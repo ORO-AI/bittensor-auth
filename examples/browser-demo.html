@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bittensor-auth demo</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 2rem;
+      max-width: 720px;
+      margin: 0 auto;
+      line-height: 1.6;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+    h1 code { color: var(--accent); font-size: 1.6rem; }
+    .subtitle { color: var(--muted); margin-bottom: 2rem; font-size: 0.95rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+    }
+    .card h2 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 0.6rem 1.2rem;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      font-weight: 600;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.85; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.secondary {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .step:last-child { border-bottom: none; }
+    .step-num {
+      background: var(--border);
+      color: var(--muted);
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-num.done { background: var(--green); color: #fff; }
+    .step-num.active { background: var(--accent); color: #fff; }
+    .step-num.error { background: var(--red); color: #fff; }
+    .step-content { flex: 1; min-width: 0; }
+    .step-label { font-weight: 600; font-size: 0.95rem; }
+    .step-detail {
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+      word-break: break-all;
+    }
+    .step-detail.success { color: var(--green); }
+    .step-detail.error { color: var(--red); }
+    .hotkey {
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.85rem;
+      color: var(--accent);
+      background: rgba(88, 166, 255, 0.1);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+    }
+    .response-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      margin-top: 0.75rem;
+      font-family: 'SF Mono', SFMono-Regular, Consolas, monospace;
+      font-size: 0.85rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .status-badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .status-badge.ok { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+    .status-badge.err { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+    .actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+    #no-extension {
+      background: rgba(210, 153, 34, 0.1);
+      border: 1px solid var(--orange);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+      display: none;
+    }
+    #no-extension a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <h1><code>bittensor-auth</code></h1>
+  <p class="subtitle">Browser wallet authentication demo &mdash; connect your Polkadot.js wallet to authenticate via SR25519 signature</p>
+
+  <div id="no-extension">
+    <strong>No wallet extension detected.</strong><br>
+    Install <a href="https://polkadot.js.org/extension/" target="_blank">Polkadot.js Extension</a>,
+    <a href="https://talisman.xyz" target="_blank">Talisman</a>, or
+    <a href="https://subwallet.app" target="_blank">SubWallet</a> to try this demo.
+  </div>
+
+  <!-- Step 1: Connect -->
+  <div class="card">
+    <h2>Wallet Connection</h2>
+    <div id="connect-area">
+      <button id="btn-connect" onclick="connectWallet()">Connect Wallet</button>
+    </div>
+    <div id="connected-info" style="display:none">
+      Connected as <span class="hotkey" id="display-hotkey"></span>
+    </div>
+  </div>
+
+  <!-- Step 2: Auth flow -->
+  <div class="card">
+    <h2>Challenge / Session Flow</h2>
+    <div class="step" id="step-1">
+      <div class="step-num" id="sn-1">1</div>
+      <div class="step-content">
+        <div class="step-label">Request challenge</div>
+        <div class="step-detail" id="sd-1">POST /auth/challenge</div>
+      </div>
+    </div>
+    <div class="step" id="step-2">
+      <div class="step-num" id="sn-2">2</div>
+      <div class="step-content">
+        <div class="step-label">Sign with wallet</div>
+        <div class="step-detail" id="sd-2">signRaw(challenge) via browser extension</div>
+      </div>
+    </div>
+    <div class="step" id="step-3">
+      <div class="step-num" id="sn-3">3</div>
+      <div class="step-content">
+        <div class="step-label">Exchange for session</div>
+        <div class="step-detail" id="sd-3">POST /auth/session</div>
+      </div>
+    </div>
+    <div class="step" id="step-4">
+      <div class="step-num" id="sn-4">4</div>
+      <div class="step-content">
+        <div class="step-label">Authenticated request</div>
+        <div class="step-detail" id="sd-4">GET /me with Bearer token</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button id="btn-auth" onclick="runAuthFlow()" disabled>Authenticate</button>
+      <button id="btn-logout" class="secondary" onclick="logout()" disabled>Logout</button>
+    </div>
+  </div>
+
+  <!-- Response -->
+  <div class="card" id="response-card" style="display:none">
+    <h2>Server Response</h2>
+    <span class="status-badge" id="response-status"></span>
+    <div class="response-box" id="response-body"></div>
+  </div>
+
+  <!-- Load polkadot.js from CDN -->
+  <script type="module">
+    import { web3Enable, web3Accounts, web3FromAddress } from 'https://esm.sh/@polkadot/extension-dapp@0.53.1';
+    import { stringToHex } from 'https://esm.sh/@polkadot/util@13.4.1';
+
+    const API = window.location.origin;
+    let address = null;
+    let injector = null;
+    let sessionToken = null;
+
+    // Expose to onclick handlers
+    window.connectWallet = connectWallet;
+    window.runAuthFlow = runAuthFlow;
+    window.logout = logout;
+
+    // Check for extension on load
+    const injected = window.injectedWeb3;
+    if (!injected || Object.keys(injected).length === 0) {
+      document.getElementById('no-extension').style.display = 'block';
+    }
+
+    async function connectWallet() {
+      const btn = document.getElementById('btn-connect');
+      btn.textContent = 'Connecting...';
+      btn.disabled = true;
+
+      try {
+        const extensions = await web3Enable('bittensor-auth demo');
+        if (extensions.length === 0) {
+          document.getElementById('no-extension').style.display = 'block';
+          btn.textContent = 'Connect Wallet';
+          btn.disabled = false;
+          return;
+        }
+
+        const accounts = await web3Accounts();
+        if (accounts.length === 0) {
+          alert('No accounts found. Create an account in your wallet extension first.');
+          btn.textContent = 'Connect Wallet';
+          btn.disabled = false;
+          return;
+        }
+
+        // Use first account (or show picker for multi-account)
+        address = accounts[0].address;
+        injector = await web3FromAddress(address);
+
+        document.getElementById('connect-area').style.display = 'none';
+        document.getElementById('connected-info').style.display = 'block';
+        document.getElementById('display-hotkey').textContent =
+          address.slice(0, 8) + '...' + address.slice(-6);
+        document.getElementById('btn-auth').disabled = false;
+      } catch (err) {
+        console.error('Connect failed:', err);
+        btn.textContent = 'Connect Wallet';
+        btn.disabled = false;
+        alert('Failed to connect: ' + err.message);
+      }
+    }
+
+    function setStep(n, state, detail) {
+      const sn = document.getElementById(`sn-${n}`);
+      sn.className = 'step-num ' + state;
+      if (detail) {
+        const sd = document.getElementById(`sd-${n}`);
+        sd.textContent = detail;
+        sd.className = 'step-detail' + (state === 'done' ? ' success' : state === 'error' ? ' error' : '');
+      }
+    }
+
+    function resetSteps() {
+      for (let i = 1; i <= 4; i++) {
+        document.getElementById(`sn-${i}`).className = 'step-num';
+      }
+    }
+
+    function showResponse(status, body) {
+      const card = document.getElementById('response-card');
+      card.style.display = 'block';
+      const badge = document.getElementById('response-status');
+      badge.textContent = status;
+      badge.className = 'status-badge ' + (status < 300 ? 'ok' : 'err');
+      document.getElementById('response-body').textContent =
+        typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+    }
+
+    async function runAuthFlow() {
+      if (!address || !injector) return;
+      resetSteps();
+      document.getElementById('btn-auth').disabled = true;
+
+      try {
+        // Step 1: Request challenge
+        setStep(1, 'active');
+        const challengeResp = await fetch(`${API}/auth/challenge`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hotkey: address }),
+        });
+        const challengeData = await challengeResp.json();
+        if (!challengeResp.ok) throw new Error(JSON.stringify(challengeData));
+        setStep(1, 'done', `Challenge: ${challengeData.challenge.slice(0, 35)}...`);
+
+        // Step 2: Sign with wallet
+        setStep(2, 'active', 'Waiting for wallet signature...');
+        const { signature } = await injector.signer.signRaw({
+          address,
+          data: stringToHex(challengeData.challenge),
+          type: 'bytes',
+        });
+        setStep(2, 'done', `Signature: ${signature.slice(0, 20)}...`);
+
+        // Step 3: Exchange for session
+        setStep(3, 'active');
+        const sessionResp = await fetch(`${API}/auth/session`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hotkey: address,
+            challenge: challengeData.challenge,
+            signature: signature,
+          }),
+        });
+        const sessionData = await sessionResp.json();
+        if (!sessionResp.ok) throw new Error(JSON.stringify(sessionData));
+        sessionToken = sessionData.session_token;
+        setStep(3, 'done', `Token: ${sessionToken.slice(0, 16)}... | Role: ${sessionData.role}`);
+
+        // Step 4: Authenticated request
+        setStep(4, 'active');
+        const meResp = await fetch(`${API}/me`, {
+          headers: { 'Authorization': `Bearer ${sessionToken}` },
+        });
+        const meData = await meResp.json();
+        setStep(4, 'done', `${meResp.status} OK`);
+        showResponse(meResp.status, meData);
+
+        document.getElementById('btn-logout').disabled = false;
+      } catch (err) {
+        console.error('Auth flow failed:', err);
+        showResponse('Error', err.message);
+      } finally {
+        document.getElementById('btn-auth').disabled = false;
+      }
+    }
+
+    async function logout() {
+      if (!sessionToken) return;
+      try {
+        const resp = await fetch(`${API}/auth/logout`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${sessionToken}` },
+        });
+        const data = await resp.json();
+        showResponse(resp.status, data);
+        sessionToken = null;
+        document.getElementById('btn-logout').disabled = true;
+        resetSteps();
+      } catch (err) {
+        console.error('Logout failed:', err);
+      }
+    }
+  </script>
+</body>
+</html>
