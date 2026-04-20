@@ -47,7 +47,10 @@ def _default_metagraph_factory(netuid: int, subtensor: Any) -> MetagraphLike:
 
     metagraph = Metagraph(netuid=netuid)
     metagraph.sync(subtensor=subtensor, lite=True)
-    return metagraph
+    # ``bittensor.Metagraph`` is untyped upstream; it satisfies the
+    # ``MetagraphLike`` protocol structurally (``hotkeys``, ``validator_permit``,
+    # ``S``) but mypy can't see that without stubs.
+    return metagraph  # type: ignore[no-any-return]
 
 
 class MetagraphCache:

@@ -36,7 +36,10 @@ cache = InMemoryCache()
 metagraph = MetagraphCache(config)
 session_store = SessionStore(cache)
 auth = BittensorAuth(
-    config=config, cache=cache, metagraph=metagraph, session_store=session_store,
+    config=config,
+    cache=cache,
+    metagraph=metagraph,
+    session_store=session_store,
 )
 
 

@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an addition or improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: |
+        Describe the use case or gap you've hit with the current API. We're much more likely to say yes when the proposal closes a real gap than when it invents a new API in isolation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: |
+        What would you like the API to look like? Code sketches welcome.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        What are the trade-offs? Is there an existing API that almost works?
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: Backwards compatible (no breaking change)
+        - label: Requires a wire-format change
+        - label: Requires a new optional dependency

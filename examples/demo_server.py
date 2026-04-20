@@ -14,11 +14,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pathlib import Path
 
 from bittensor_auth import (
     BittensorAuthConfig,
@@ -32,8 +32,8 @@ from bittensor_auth.fastapi import (
     build_auth_router,
 )
 
-
 # --- Fake metagraph: accepts any hotkey as registered ---
+
 
 class OpenMetagraph:
     """A metagraph where everyone is registered. For demos only."""
@@ -61,7 +61,10 @@ metagraph = MetagraphCache(
 )
 session_store = SessionStore(cache, session_ttl_seconds=3600, challenge_ttl_seconds=120)
 auth = BittensorAuth(
-    config=config, cache=cache, metagraph=metagraph, session_store=session_store,
+    config=config,
+    cache=cache,
+    metagraph=metagraph,
+    session_store=session_store,
 )
 
 
