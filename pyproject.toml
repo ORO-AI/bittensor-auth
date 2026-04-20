@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bittensor-auth"
+version = "0.1.0"
+description = "Production-ready Bittensor authentication for Python web frameworks. SR25519 signature verification, metagraph-based registration checks, nonce replay protection, and session management."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "ORO AI", email = "team@oroagents.com" },
+]
+keywords = ["bittensor", "authentication", "sr25519", "fastapi", "middleware", "web3"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+dependencies = [
+    # Pin to the v8.x line. SR25519 signature verification and SS58
+    # semantics live in ``bittensor_wallet``, which bittensor 8.x
+    # bundles; a major bump to 9.x could silently change verification
+    # behavior, so require explicit opt-in via a new release.
+    "bittensor>=8.0.0,<9.0.0",
+]
+
+[project.optional-dependencies]
+fastapi = [
+    "fastapi>=0.100.0",
+    "pydantic>=2.0.0",
+]
+redis = [
+    "redis>=5.0.0",
+]
+client = [
+    "httpx>=0.24.0",
+]
+all = [
+    "bittensor-auth[fastapi,redis,client]",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "httpx>=0.24.0",
+    "fastapi>=0.100.0",
+    "pydantic>=2.0.0",
+    "redis>=5.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/ORO-AI/bittensor-auth"
+Documentation = "https://github.com/ORO-AI/bittensor-auth#readme"
+Repository = "https://github.com/ORO-AI/bittensor-auth"
+Issues = "https://github.com/ORO-AI/bittensor-auth/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bittensor_auth"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
