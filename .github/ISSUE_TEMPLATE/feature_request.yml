@@ -7,17 +7,16 @@ body:
     attributes:
       label: What problem are you trying to solve?
       description: |
-        Describe the use case or gap you've hit with the current API. We're much more likely to say yes when the proposal closes a real gap than when it invents a new API in isolation.
+        Describe the use case or gap you've hit. Concrete problems land much faster than abstract "it would be nice if…" proposals.
     validations:
       required: true
 
   - type: textarea
     id: proposal
     attributes:
-      label: Proposed change
+      label: What would you like to see?
       description: |
-        What would you like the API to look like? Code sketches welcome.
-      render: python
+        Your preferred solution. Anything goes — an API sketch, a doc change, a new example, a config default, a helper, better defaults. Code sketches in fenced ```python blocks are welcome but not required.
     validations:
       required: true
 
@@ -26,7 +25,7 @@ body:
     attributes:
       label: Alternatives considered
       description: |
-        What are the trade-offs? Is there an existing API that almost works?
+        What are the trade-offs? Is there an existing feature that almost works?
 
   - type: checkboxes
     id: scope
