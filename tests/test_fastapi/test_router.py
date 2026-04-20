@@ -45,14 +45,10 @@ def _build_app(
 
 def _get_challenge(client: TestClient, hotkey: str) -> str:
     """Request a challenge and return the challenge string."""
-    return client.post(
-        "/auth/challenge", json={"hotkey": hotkey}
-    ).json()["challenge"]
+    return client.post("/auth/challenge", json={"hotkey": hotkey}).json()["challenge"]
 
 
-def _create_session(
-    client: TestClient, keypair: Keypair, challenge: str
-) -> dict:
+def _create_session(client: TestClient, keypair: Keypair, challenge: str) -> dict:
     """Exchange a signed challenge for a session and return the response body."""
     return client.post(
         "/auth/session",
@@ -315,9 +311,7 @@ class TestLogout:
     def test_logout_unknown_token_returns_401(self) -> None:
         app, _ = _build_app(role_resolver=lambda hk: "user")
         with TestClient(app) as client:
-            resp = client.post(
-                "/auth/logout", headers={"Authorization": "Bearer ses_unknowntoken"}
-            )
+            resp = client.post("/auth/logout", headers={"Authorization": "Bearer ses_unknowntoken"})
         assert resp.status_code == 401
         assert "session" in resp.json()["detail"].lower()
 

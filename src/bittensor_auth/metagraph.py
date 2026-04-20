@@ -11,6 +11,7 @@ import concurrent.futures
 import contextlib
 import logging
 import threading
+import time
 from collections.abc import Callable
 from typing import Any, Protocol, runtime_checkable
 
@@ -74,6 +75,8 @@ class MetagraphCache:
             max_workers=1, thread_name_prefix="metagraph-sync"
         )
         self._refresh_task: asyncio.Task[None] | None = None
+        self._hotkey_index: dict[str, int] = {}
+        self._last_synced_at: float | None = None
 
     @property
     def is_synced(self) -> bool:
@@ -83,18 +86,47 @@ class MetagraphCache:
     def metagraph(self) -> MetagraphLike | None:
         return self._metagraph
 
+    @property
+    def last_synced_at(self) -> float | None:
+        """Unix timestamp of the last successful sync, or ``None`` if never synced.
+
+        Expose this to your monitoring layer to alarm on prolonged chain
+        partitions — a silent stale snapshot can freeze ban/deregistration
+        state across the fleet.
+        """
+        return self._last_synced_at
+
+    def seconds_since_last_sync(self) -> float | None:
+        """Wall-clock seconds since the last successful sync, or ``None``."""
+        if self._last_synced_at is None:
+            return None
+        return time.time() - self._last_synced_at
+
+    def _is_snapshot_stale(self) -> bool:
+        """Return True if the snapshot age exceeds ``metagraph_max_age_seconds``.
+
+        When the limit is zero, staleness checking is disabled.
+        """
+        max_age = self._config.metagraph_max_age_seconds
+        if max_age <= 0:
+            return False
+        age = self.seconds_since_last_sync()
+        return age is not None and age > max_age
+
     def sync_now(self) -> None:
         """Refresh the cached metagraph from the chain. Never raises."""
         try:
             with self._chain_lock:
                 if self._subtensor is None:
-                    self._subtensor = self._subtensor_factory(
-                        self._config.subtensor_network
-                    )
-                metagraph = self._metagraph_factory(
-                    self._config.subnet_netuid, self._subtensor
-                )
+                    self._subtensor = self._subtensor_factory(self._config.subtensor_network)
+                metagraph = self._metagraph_factory(self._config.subnet_netuid, self._subtensor)
+                # Build the hotkey-to-uid index once per sync so request-path
+                # queries are O(1) instead of O(n) linear scans. Both the
+                # snapshot and index are swapped together under the lock.
+                hotkey_index = {hk: i for i, hk in enumerate(metagraph.hotkeys)}
                 self._metagraph = metagraph
+                self._hotkey_index = hotkey_index
+                self._last_synced_at = time.time()
             logger.info(
                 "Metagraph synced: %d neurons on netuid %d",
                 len(metagraph.hotkeys),
@@ -141,29 +173,44 @@ class MetagraphCache:
                 # Executor already shut down — stop() was called concurrently.
                 return
 
-    def is_hotkey_registered(self, hotkey: str) -> bool:
-        """Return whether ``hotkey`` is registered. ``False`` if unsynced."""
+    def _snapshot_or_none(self, op: str, hotkey: str) -> MetagraphLike | None:
+        """Return the current snapshot, or ``None`` if unsynced or stale."""
         metagraph = self._metagraph
         if metagraph is None:
             logger.warning(
-                "Metagraph not synced; is_hotkey_registered(%s) returning False",
-                hotkey[:16] + "...",
+                "Metagraph not synced; %s(%s...) returning None",
+                op,
+                hotkey[:16],
             )
+            return None
+        if self._is_snapshot_stale():
+            logger.error(
+                "Metagraph snapshot stale (age=%.0fs > max=%ds); %s(%s...) failing closed",
+                self.seconds_since_last_sync() or 0.0,
+                self._config.metagraph_max_age_seconds,
+                op,
+                hotkey[:16],
+            )
+            return None
+        return metagraph
+
+    def is_hotkey_registered(self, hotkey: str) -> bool:
+        """Return whether ``hotkey`` is registered. ``False`` if unsynced or stale."""
+        if self._snapshot_or_none("is_hotkey_registered", hotkey) is None:
             return False
-        return hotkey in metagraph.hotkeys
+        return hotkey in self._hotkey_index
 
     def has_validator_permit(self, hotkey: str) -> bool:
-        """Check validator permit and stake floor. ``False`` if unsynced or below threshold."""
-        metagraph = self._metagraph
+        """Check validator permit and stake floor.
+
+        ``False`` if unsynced, snapshot is stale, hotkey not in metagraph,
+        permit flag is unset, or stake is below the configured minimum.
+        """
+        metagraph = self._snapshot_or_none("has_validator_permit", hotkey)
         if metagraph is None:
-            logger.warning(
-                "Metagraph not synced; has_validator_permit(%s) returning False",
-                hotkey[:16] + "...",
-            )
             return False
-        try:
-            uid = metagraph.hotkeys.index(hotkey)
-        except ValueError:
+        uid = self._hotkey_index.get(hotkey)
+        if uid is None:
             return False
         if not bool(metagraph.validator_permit[uid]):
             return False
@@ -181,12 +228,11 @@ class MetagraphCache:
         return True
 
     def get_stake_weight(self, hotkey: str) -> float | None:
-        """Return stake weight, or ``None`` if unsynced or hotkey unknown."""
-        metagraph = self._metagraph
+        """Return stake weight, or ``None`` if unsynced, stale, or unknown."""
+        metagraph = self._snapshot_or_none("get_stake_weight", hotkey)
         if metagraph is None:
             return None
-        try:
-            uid = metagraph.hotkeys.index(hotkey)
-        except ValueError:
+        uid = self._hotkey_index.get(hotkey)
+        if uid is None:
             return None
         return float(metagraph.S[uid])

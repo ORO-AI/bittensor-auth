@@ -49,15 +49,25 @@ def _resolve_signer(signer_or_wallet: Any) -> Signer:
     return signer_or_wallet  # type: ignore[no-any-return]
 
 
+_DEFAULT_PUBLIC_PATHS = frozenset({"/health", "/healthz", "/ready", "/ping"})
+
+
 def default_is_public_endpoint(url: str | None) -> bool:
-    """Skip auth for ``/health`` only. Pass a custom predicate for other public paths."""
+    """Return ``True`` for a small whitelist of common public paths.
+
+    Exact match only — suffix matching (``endswith("/health")``) is
+    avoided because it would also match paths like ``/admin/x/health``
+    and silently skip signing on them. Pass a custom predicate to
+    ``SigningTransport`` / ``BittensorAuthClient`` for adopter-specific
+    public paths (e.g. ``/v1/public/*``).
+    """
     if not url:
         return False
     try:
         pathname = urlparse(url).path or url
     except Exception:
         pathname = url
-    return pathname == "/health" or pathname.endswith("/health")
+    return pathname in _DEFAULT_PUBLIC_PATHS
 
 
 def generate_auth_headers(
@@ -103,9 +113,7 @@ class SigningTransport(httpx.BaseTransport):
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         if not self._is_public_endpoint(str(request.url)):
-            headers = generate_auth_headers(
-                self._signer, message_builder=self._message_builder
-            )
+            headers = generate_auth_headers(self._signer, message_builder=self._message_builder)
             for key, value in headers.items():
                 request.headers[key] = value
         return self._wrapped.handle_request(request)
@@ -132,9 +140,7 @@ class AsyncSigningTransport(httpx.AsyncBaseTransport):
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if not self._is_public_endpoint(str(request.url)):
-            headers = generate_auth_headers(
-                self._signer, message_builder=self._message_builder
-            )
+            headers = generate_auth_headers(self._signer, message_builder=self._message_builder)
             for key, value in headers.items():
                 request.headers[key] = value
         return await self._wrapped.handle_async_request(request)

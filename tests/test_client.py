@@ -60,41 +60,53 @@ class TestGenerateAuthHeaders:
 
     def test_round_trip_through_verify_signature(self, alice: Keypair) -> None:
         headers = generate_auth_headers(alice)
-        assert verify_signature(
-            hotkey=headers["X-Hotkey"],
-            timestamp=headers["X-Timestamp"],
-            nonce=headers["X-Nonce"],
-            signature_hex=headers["X-Signature"],
-        ) is True
+        assert (
+            verify_signature(
+                hotkey=headers["X-Hotkey"],
+                timestamp=headers["X-Timestamp"],
+                nonce=headers["X-Nonce"],
+                signature_hex=headers["X-Signature"],
+            )
+            is True
+        )
 
     def test_tampered_nonce_fails_verification(self, alice: Keypair) -> None:
         headers = generate_auth_headers(alice, nonce="original")
-        assert verify_signature(
-            hotkey=headers["X-Hotkey"],
-            timestamp=headers["X-Timestamp"],
-            nonce="tampered",
-            signature_hex=headers["X-Signature"],
-        ) is False
+        assert (
+            verify_signature(
+                hotkey=headers["X-Hotkey"],
+                timestamp=headers["X-Timestamp"],
+                nonce="tampered",
+                signature_hex=headers["X-Signature"],
+            )
+            is False
+        )
 
     def test_wrong_signer_fails_verification(self, alice: Keypair, bob: Keypair) -> None:
         headers = generate_auth_headers(alice)
-        assert verify_signature(
-            hotkey=bob.ss58_address,
-            timestamp=headers["X-Timestamp"],
-            nonce=headers["X-Nonce"],
-            signature_hex=headers["X-Signature"],
-        ) is False
+        assert (
+            verify_signature(
+                hotkey=bob.ss58_address,
+                timestamp=headers["X-Timestamp"],
+                nonce=headers["X-Nonce"],
+                signature_hex=headers["X-Signature"],
+            )
+            is False
+        )
 
     def test_accepts_wallet_like_object(self, alice: Keypair) -> None:
         wallet = FakeWallet(hotkey=alice)
         headers = generate_auth_headers(wallet)
         assert headers["X-Hotkey"] == alice.ss58_address
-        assert verify_signature(
-            hotkey=headers["X-Hotkey"],
-            timestamp=headers["X-Timestamp"],
-            nonce=headers["X-Nonce"],
-            signature_hex=headers["X-Signature"],
-        ) is True
+        assert (
+            verify_signature(
+                hotkey=headers["X-Hotkey"],
+                timestamp=headers["X-Timestamp"],
+                nonce=headers["X-Nonce"],
+                signature_hex=headers["X-Signature"],
+            )
+            is True
+        )
 
 
 class TestDefaultIsPublicEndpoint:
@@ -103,18 +115,30 @@ class TestDefaultIsPublicEndpoint:
         [
             "/health",
             "https://api.example.com/health",
-            "https://api.example.com/v1/health",
-            "/v1/nested/health",
+            "/healthz",
+            "/ready",
+            "/ping",
         ],
     )
-    def test_health_paths_are_public(self, url: str) -> None:
+    def test_common_health_paths_are_public(self, url: str) -> None:
         assert default_is_public_endpoint(url) is True
 
     @pytest.mark.parametrize(
         "url",
-        ["/protected", "https://api.example.com/v1/private", "/api/resource", "", None],
+        [
+            "/protected",
+            "https://api.example.com/v1/private",
+            "/api/resource",
+            "",
+            None,
+            # Regression: suffix match must NOT leak — a nested /health
+            # under an authenticated prefix should still be signed.
+            "/v1/health",
+            "/v1/nested/health",
+            "/admin/rehealth",
+        ],
     )
-    def test_non_health_paths_are_not_public(self, url: str | None) -> None:
+    def test_non_public_paths_are_not_skipped(self, url: str | None) -> None:
         assert default_is_public_endpoint(url) is False
 
 
@@ -213,9 +237,7 @@ class TestAsyncSigningTransport:
             return httpx.Response(200)
 
         transport = AsyncSigningTransport(alice, wrapped=httpx.MockTransport(mock_handler))
-        async with httpx.AsyncClient(
-            base_url="https://example.com", transport=transport
-        ) as client:
+        async with httpx.AsyncClient(base_url="https://example.com", transport=transport) as client:
             resp = await client.get("/protected")
 
         assert resp.status_code == 200
@@ -229,9 +251,7 @@ class TestAsyncSigningTransport:
             return httpx.Response(200)
 
         transport = AsyncSigningTransport(alice, wrapped=httpx.MockTransport(mock_handler))
-        async with httpx.AsyncClient(
-            base_url="https://example.com", transport=transport
-        ) as client:
+        async with httpx.AsyncClient(base_url="https://example.com", transport=transport) as client:
             await client.get("/health")
 
         assert "x-hotkey" not in captured["headers"]

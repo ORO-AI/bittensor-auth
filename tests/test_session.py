@@ -162,17 +162,13 @@ class TestSessionStoreConstruction:
         [{"session_ttl_seconds": 0}, {"challenge_ttl_seconds": 0}],
         ids=["non-positive-session-ttl", "non-positive-challenge-ttl"],
     )
-    def test_rejects_non_positive_ttl(
-        self, cache: InMemoryCache, kwargs: dict
-    ) -> None:
+    def test_rejects_non_positive_ttl(self, cache: InMemoryCache, kwargs: dict) -> None:
         with pytest.raises(ValueError):
             SessionStore(cache, **kwargs)
 
 
 class TestAtomicChallengeConsumption:
-    async def test_concurrent_consumers_exactly_one_wins(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_concurrent_consumers_exactly_one_wins(self, cache: InMemoryCache) -> None:
         """Only one of N racing consumers may receive the challenge."""
         store = SessionStore(cache)
         await store.store_challenge(ALICE_HOTKEY, "bittensor-auth:1700000000:race")

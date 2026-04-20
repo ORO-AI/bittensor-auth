@@ -15,7 +15,6 @@ from .errors import AuthenticationError, AuthErrorCode
 MessageBuilder = Callable[[str, str | int, str], str]
 
 
-
 def colon_separated(hotkey: str, timestamp: str | int, nonce: str) -> str:
     """``{hotkey}:{timestamp}:{nonce}`` — the most common format.
 

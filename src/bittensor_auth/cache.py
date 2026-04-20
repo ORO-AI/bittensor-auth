@@ -57,6 +57,17 @@ class CacheBackend(ABC):
     @abstractmethod
     async def expire(self, key: str, ttl: int) -> bool: ...
 
+    @abstractmethod
+    async def smembers_and_delete(self, key: str) -> _StrSet:
+        """Atomically return all members of ``key`` and delete the set.
+
+        Closes the race window in bulk-revocation paths where a caller
+        reads the membership, iterates, then deletes the index — allowing
+        a concurrent add to escape revocation. Implementations MUST perform
+        the read and delete in a single atomic step (Lua/MULTI for Redis,
+        lock-held for in-memory).
+        """
+
 
 class InMemoryCache(CacheBackend):
     """Process-local cache with monotonic-clock TTL expiry.
@@ -179,6 +190,15 @@ class InMemoryCache(CacheBackend):
             self._sets.pop(key, None)
             return False
 
+    async def smembers_and_delete(self, key: str) -> _StrSet:
+        async with self._lock:
+            members = self._get_set_locked(key)
+            if members is None:
+                return set()
+            snapshot = set(members)
+            del self._sets[key]
+            return snapshot
+
     async def clear(self) -> None:
         async with self._lock:
             self._store.clear()
@@ -258,6 +278,15 @@ class RedisCache(CacheBackend):
 
     async def expire(self, key: str, ttl: int) -> bool:
         return bool(await self._client.expire(key, ttl))
+
+    # Atomic SMEMBERS + DEL so bulk-revocation paths close their race window.
+    _SMEMBERS_AND_DELETE_SCRIPT = (
+        "local members = redis.call('SMEMBERS', KEYS[1]) redis.call('DEL', KEYS[1]) return members"
+    )
+
+    async def smembers_and_delete(self, key: str) -> _StrSet:
+        members = await self._client.eval(self._SMEMBERS_AND_DELETE_SCRIPT, 1, key)
+        return set(members) if members else set()
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -26,7 +26,11 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
 ]
 dependencies = [
-    "bittensor>=8.0.0",
+    # Pin to the v8.x line. SR25519 signature verification and SS58
+    # semantics live in ``bittensor_wallet``, which bittensor 8.x
+    # bundles; a major bump to 9.x could silently change verification
+    # behavior, so require explicit opt-in via a new release.
+    "bittensor>=8.0.0,<9.0.0",
 ]
 
 [project.optional-dependencies]

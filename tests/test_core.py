@@ -91,8 +91,6 @@ class TestVerifySr25519:
         ],
         ids=["malformed-hex", "invalid-hotkey", "wrong-length"],
     )
-    def test_invalid_inputs_return_false(
-        self, alice: Keypair, hotkey: str, signature: str
-    ) -> None:
+    def test_invalid_inputs_return_false(self, alice: Keypair, hotkey: str, signature: str) -> None:
         actual_hotkey = alice.ss58_address if hotkey == "placeholder" else hotkey
         assert verify_sr25519(actual_hotkey, "hello", signature) is False

@@ -240,9 +240,7 @@ class TestBanCheckerHook:
         """``authenticate`` skips registration + ban checks by design."""
         calls: list[str] = []
 
-        metagraph = make_synced_metagraph_cache(
-            hotkeys=[], validator_permit=[], stake=[]
-        )
+        metagraph = make_synced_metagraph_cache(hotkeys=[], validator_permit=[], stake=[])
         auth = BittensorAuth(
             config=BittensorAuthConfig(),
             cache=InMemoryCache(),
@@ -333,3 +331,117 @@ class TestRequireAuth:
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/dual", headers=generate_auth_headers(bob))
         assert resp.status_code == 403
+
+
+class TestSessionRecheck:
+    """Regression tests for the session-recheck plumbing.
+
+    When ``recheck_registration_on_session`` / ``recheck_ban_on_session``
+    are enabled (default), a hotkey that deregisters mid-session loses
+    access on the next request instead of waiting for the session TTL.
+    """
+
+    def test_deregistered_hotkey_rejected_by_default(self, alice: Keypair, bob: Keypair) -> None:
+        """With recheck enabled, a hotkey not in the metagraph is rejected
+        even though its session token is still within TTL."""
+        cache = InMemoryCache()
+        # Metagraph contains alice only; bob is not registered.
+        metagraph = make_synced_metagraph_cache(
+            hotkeys=[alice.ss58_address], validator_permit=[False], stake=[0.0]
+        )
+        store = SessionStore(cache)
+        auth = BittensorAuth(
+            config=BittensorAuthConfig(),  # defaults: recheck on
+            cache=cache,
+            metagraph=metagraph,
+            session_store=store,
+        )
+        # Create a session for bob manually (as if bob had been registered
+        # at session-creation time and later deregistered).
+        token = asyncio.get_event_loop().run_until_complete(
+            store.create_session(bob.ss58_address, "miner")
+        )
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 401
+
+    def test_opt_out_allows_stale_session(self, alice: Keypair, bob: Keypair) -> None:
+        """With both rechecks disabled, session role is frozen at issuance."""
+        cache = InMemoryCache()
+        metagraph = make_synced_metagraph_cache(
+            hotkeys=[alice.ss58_address], validator_permit=[False], stake=[0.0]
+        )
+        store = SessionStore(cache)
+        auth = BittensorAuth(
+            config=BittensorAuthConfig(
+                recheck_registration_on_session=False,
+                recheck_ban_on_session=False,
+            ),
+            cache=cache,
+            metagraph=metagraph,
+            session_store=store,
+        )
+        token = asyncio.get_event_loop().run_until_complete(
+            store.create_session(bob.ss58_address, "miner")
+        )
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
+        # The session is honored since recheck is disabled — this is the
+        # old (pre-fix) behavior, kept available as an opt-in.
+        assert resp.status_code == 200
+
+    def test_role_resolver_rebinds_role_on_session_auth(self, alice: Keypair) -> None:
+        """When the role resolver is configured, session auth honors the
+        resolver's current answer rather than the cached session.role."""
+        cache = InMemoryCache()
+        metagraph = make_synced_metagraph_cache(
+            hotkeys=[alice.ss58_address], validator_permit=[True], stake=[100.0]
+        )
+        store = SessionStore(cache)
+
+        # Resolver "upgrades" alice from miner → validator live.
+        def resolver(hotkey: str) -> str | None:
+            return "validator" if hotkey == alice.ss58_address else None
+
+        auth = BittensorAuth(
+            config=BittensorAuthConfig(),
+            cache=cache,
+            metagraph=metagraph,
+            role_resolver=resolver,
+            session_store=store,
+        )
+        token = asyncio.get_event_loop().run_until_complete(
+            store.create_session(alice.ss58_address, "miner")
+        )
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200
+        assert resp.json()["role"] == "validator"
+
+
+class TestBearerTokenParsing:
+    """Bearer token extraction must be case-insensitive and whitespace-tolerant."""
+
+    def test_lowercase_bearer_scheme_accepted(self, alice: Keypair) -> None:
+        auth, store = make_auth_with_session(alice)
+        token = asyncio.get_event_loop().run_until_complete(
+            store.create_session(alice.ss58_address, "user")
+        )
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": f"bearer {token}"})
+        assert resp.status_code == 200
+
+    def test_extra_spaces_accepted(self, alice: Keypair) -> None:
+        auth, store = make_auth_with_session(alice)
+        token = asyncio.get_event_loop().run_until_complete(
+            store.create_session(alice.ss58_address, "user")
+        )
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": f"  Bearer   {token}  "})
+        assert resp.status_code == 200
+
+    def test_missing_token_rejected(self, alice: Keypair) -> None:
+        auth, _ = make_auth_with_session(alice)
+        with TestClient(build_test_app(auth)) as client:
+            resp = client.get("/session-only", headers={"Authorization": "Bearer"})
+        assert resp.status_code == 401

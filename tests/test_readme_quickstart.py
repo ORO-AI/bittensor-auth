@@ -49,9 +49,7 @@ class _FakeMetagraph:
 
 
 @pytest.fixture
-def patched_factories(
-    monkeypatch: pytest.MonkeyPatch, alice: Keypair
-) -> _FakeMetagraph:
+def patched_factories(monkeypatch: pytest.MonkeyPatch, alice: Keypair) -> _FakeMetagraph:
     snapshot = _FakeMetagraph([alice.ss58_address])
     real_cls = metagraph_module.MetagraphCache
 

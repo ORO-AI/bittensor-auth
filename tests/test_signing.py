@@ -58,9 +58,7 @@ class TestValidateTimestamp:
         ],
         ids=["non-integer", "float-string"],
     )
-    def test_rejects_invalid_timestamps(
-        self, bad_ts: str, error_code: AuthErrorCode
-    ) -> None:
+    def test_rejects_invalid_timestamps(self, bad_ts: str, error_code: AuthErrorCode) -> None:
         with pytest.raises(AuthenticationError) as exc:
             validate_timestamp(bad_ts, skew_seconds=60)
         assert exc.value.error is error_code

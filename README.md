@@ -340,6 +340,28 @@ defaults and may be overridden per deployment.
 | `session_ttl_seconds` | `7200` | Lifetime of session tokens issued by the router. |
 | `challenge_ttl_seconds` | `60` | Lifetime of `/challenge` nonces. |
 | `max_nonce_length` | `256` | Max character length of client-supplied nonces — defends against cache-key DoS. |
+| `recheck_registration_on_session` | `True` | If `True`, Bearer-token auth re-resolves role each request via `role_resolver`. Disable only if you accept role staleness up to `session_ttl_seconds`. |
+| `recheck_ban_on_session` | `True` | If `True`, Bearer-token auth rechecks metagraph registration each request. Makes deregistrations take effect immediately. |
+| `metagraph_max_age_seconds` | `1200` | Maximum age of the cached metagraph snapshot before queries fail closed. Guards against silent chain partitions freezing ban/registration state. Set to `0` to disable. |
+
+## Session semantics
+
+The package offers two authentication modes and they have different freshness contracts:
+
+- **Per-request signing** (`authenticate`, `require_registered`, `require_validator`) — every request re-runs signature verification, metagraph registration, and the ban check. The request is as fresh as the metagraph snapshot.
+
+- **Bearer-token sessions** (`require_session`, `require_auth`) — the challenge/response flow exchanges a signed challenge for a short-lived Bearer token stored server-side. By default the role and registration are re-checked on every request (`recheck_registration_on_session=True`, `recheck_ban_on_session=True`), so a hotkey that deregisters from the subnet loses access on its next call. If you opt out of these flags, role and registration are frozen at session-creation time for up to `session_ttl_seconds` (default 2 h) — only flip them off if you have an explicit reason.
+
+Banning a hotkey calls `SessionStore.revoke_all_sessions`, which uses the atomic `smembers_and_delete` primitive so there's no classic check-then-delete race. A truly concurrent `create_session` can still land a session in a fresh index after revocation finishes; pair `revoke_all_sessions` with a per-request `ban_checker` to catch that survivor on its next call. See `SECURITY.md` for the full threat model.
+
+## Deployment requirements
+
+The package covers authentication; a few adjacent concerns are **your** responsibility:
+
+- **Rate-limit `/challenge`.** The endpoint only format-validates the claimed hotkey, so anyone who can reach the server can create cache entries. Put a rate limiter (ingress or framework level) in front of it — a per-IP budget on the order of 10–30 req/min and a per-hotkey budget of a handful per minute is a sensible starting point.
+- **Use `RedisCache` in production.** `InMemoryCache` is process-local (sessions/nonces don't cross workers) and has no background sweeper. It's for tests and single-process development only.
+- **Monitor `MetagraphCache.last_synced_at`.** Expose the staleness in your alerting so you hear about a chain-endpoint partition before requests start failing closed.
+- **Keep `verify_ssl=True` on the client.** The SDK transport defaults to TLS verification; don't flip it off in production.
 
 ## Public API at a glance
 

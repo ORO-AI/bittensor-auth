@@ -112,12 +112,22 @@ class SessionStore:
         raw = await self._cache.get(self._session_key(token))
         if raw is None:
             return None
-        parsed = json.loads(raw)
-        return SessionData(
-            hotkey=parsed["hotkey"],
-            role=parsed["role"],
-            created_at=parsed["created_at"],
-        )
+        try:
+            parsed = json.loads(raw)
+            return SessionData(
+                hotkey=parsed["hotkey"],
+                role=parsed["role"],
+                created_at=parsed["created_at"],
+            )
+        except (json.JSONDecodeError, KeyError, TypeError):
+            # Treat malformed session records as missing so the caller
+            # returns a clean 401 instead of 500. Malformation indicates
+            # cache corruption or a version mismatch.
+            logger.warning(
+                "Session %s... has malformed data; treating as invalid",
+                token[:12],
+            )
+            return None
 
     async def delete_session(self, token: str) -> None:
         """Invalidate ``token`` and prune from the hotkey index. Idempotent."""
@@ -138,27 +148,22 @@ class SessionStore:
     async def revoke_all_sessions(self, hotkey: str) -> int:
         """Invalidate all sessions for ``hotkey``. Returns the count revoked.
 
-        Note: There is a small race window where a concurrent ``create_session``
-        between the member read and index deletion could create a session that
-        survives revocation. For Redis deployments, consider wrapping this in a
-        Lua script. For most use cases (admin ban operations), this is acceptable.
+        Uses the cache's atomic ``smembers_and_delete`` so the member
+        read and index deletion cannot interleave with a concurrent
+        ``create_session``. A token added AFTER ``smembers_and_delete``
+        returns will survive (it gets its own fresh index key) — for
+        ban-enforcement, pair this with a ban-aware dependency that
+        re-checks the ban table on each authenticated request.
         """
         index_key = self._index_key(hotkey)
-        tokens = await self._cache.smembers(index_key)
+        tokens = await self._cache.smembers_and_delete(index_key)
         for token in tokens:
             await self._cache.delete(self._session_key(token))
-        # Delete the index after clearing sessions. Any token added by a
-        # concurrent create_session between smembers and here will survive
-        # but will be caught by the ban_checker on next request.
-        if tokens:
-            await self._cache.delete(index_key)
         return len(tokens)
 
     async def store_challenge(self, hotkey: str, challenge: str) -> None:
         nonce = extract_nonce_from_challenge(challenge)
-        data = ChallengeData(
-            hotkey=hotkey, challenge=challenge, created_at=int(time.time())
-        )
+        data = ChallengeData(hotkey=hotkey, challenge=challenge, created_at=int(time.time()))
         await self._cache.setex(
             self._challenge_key(nonce), self._challenge_ttl, json.dumps(asdict(data))
         )

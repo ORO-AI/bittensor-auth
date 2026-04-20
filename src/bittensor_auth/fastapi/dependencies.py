@@ -58,6 +58,22 @@ def _banned_error() -> HTTPException:
     )
 
 
+def _extract_bearer(request: Request) -> str:
+    """Parse ``Authorization: Bearer <token>`` tolerant of case and whitespace.
+
+    Returns the stripped token. Raises 401 if the header is missing or
+    doesn't match the Bearer scheme.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    parts = auth_header.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Authorization header",
+        )
+    return parts[1].strip()
+
+
 class BittensorAuth:
     """Factory producing FastAPI authentication dependencies."""
 
@@ -78,10 +94,14 @@ class BittensorAuth:
         self._config = config
         self._cache = cache
         self._metagraph = metagraph
+        # Pass skew through so NonceTracker enforces ttl >= skew at
+        # construction. Without this, shrinking the nonce TTL below the
+        # skew window silently opens a replay gap.
         self._nonce_tracker = nonce_tracker or _NonceTracker(
             cache,
             max_nonce_length=config.max_nonce_length,
             ttl_seconds=config.timestamp_skew_seconds,
+            skew_seconds=config.timestamp_skew_seconds,
         )
         self._role_resolver = role_resolver
         self._ban_checker = ban_checker
@@ -118,48 +138,73 @@ class BittensorAuth:
         """Authenticate via Bearer session token. Requires ``session_store``."""
         if self._session_store is None:
             raise RuntimeError(
-                "require_session needs a session_store. "
-                "Pass session_store= to BittensorAuth()."
+                "require_session needs a session_store. Pass session_store= to BittensorAuth()."
             )
+        token = _extract_bearer(request)
+        return await self._authenticate_session(token)
 
+    async def require_auth(self, request: Request) -> AuthenticatedUser:
+        """Accept Bearer token or per-request signing. Ban check runs on both paths."""
         auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing or invalid Authorization header",
-            )
-        token = auth_header[7:]
+        if auth_header.strip() and self._session_store is not None:
+            # Authorization header present — must validate as a Bearer
+            # token. A presented-but-invalid Bearer must NOT silently
+            # fall through to signed-request auth.
+            token = _extract_bearer(request)
+            return await self._authenticate_session(token)
+
+        # No Authorization header → fall back to per-request signing.
+        # ``require_registered`` runs the metagraph check and the ban
+        # check; nothing else to do here.
+        return await self.require_registered(request)
+
+    async def _authenticate_session(self, token: str) -> AuthenticatedUser:
+        """Shared path for ``require_session`` and the Bearer branch of
+        ``require_auth``. Looks up the session, optionally re-resolves
+        role + registration against the live metagraph, and enforces the
+        ban check."""
+        assert self._session_store is not None  # gated by caller
         session = await self._session_store.get_session(token)
         if session is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired session",
             )
+
+        role: str | None = session.role
+        # Re-resolve role each request so deregistrations and permit
+        # changes take effect without waiting for the session TTL.
+        # The role resolver is the canonical source of truth; we only
+        # fall back to the session's cached role if no resolver is
+        # configured.
+        if self._config.recheck_registration_on_session and self._role_resolver is not None:
+            resolved = await self._resolve_role(session.hotkey)
+            if resolved is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Hotkey is no longer registered",
+                )
+            role = resolved
+
+        # Direct metagraph registration recheck, independent of
+        # role_resolver. Catches the case where a hotkey leaves the
+        # metagraph entirely.
+        if self._config.recheck_ban_on_session and not self._metagraph.is_hotkey_registered(
+            session.hotkey
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Hotkey is no longer registered",
+            )
+
         user = AuthenticatedUser(
-            hotkey=session.hotkey, timestamp=0, nonce="", role=session.role,
+            hotkey=session.hotkey,
+            timestamp=0,
+            nonce="",
+            role=role,
         )
         await self._check_banned(user)
         return user
-
-    async def require_auth(self, request: Request) -> AuthenticatedUser:
-        """Accept Bearer token or per-request signing. Ban check runs on both paths."""
-        auth_header = request.headers.get("Authorization", "")
-        if auth_header.startswith("Bearer ") and self._session_store is not None:
-            token = auth_header[7:]
-            session = await self._session_store.get_session(token)
-            if session is not None:
-                user = AuthenticatedUser(
-                    hotkey=session.hotkey, timestamp=0, nonce="", role=session.role,
-                )
-                await self._check_banned(user)
-                return user
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired session",
-            )
-
-        # Fall back to per-request signing (require_registered already checks bans)
-        return await self.require_registered(request)
 
     async def _authenticate(self, request: Request) -> AuthenticatedUser:
         headers, missing = self._extract_headers(request)
@@ -179,7 +224,10 @@ class BittensorAuth:
                 raise AuthenticationError(AuthErrorCode.NONCE_TOO_LONG)
 
             if not verify_signature(
-                hotkey, timestamp_str, nonce, signature,
+                hotkey,
+                timestamp_str,
+                nonce,
+                signature,
                 message_builder=self._message_builder,
             ):
                 raise AuthenticationError(AuthErrorCode.INVALID_SIGNATURE)

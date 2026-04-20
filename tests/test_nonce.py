@@ -26,16 +26,12 @@ class TestNonceRegistration:
 
         assert exc_info.value.error is AuthErrorCode.NONCE_REUSED
 
-    async def test_different_nonces_same_hotkey_both_succeed(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_different_nonces_same_hotkey_both_succeed(self, cache: InMemoryCache) -> None:
         tracker = NonceTracker(cache)
         await tracker.register(ALICE_HOTKEY, "nonce-a")
         await tracker.register(ALICE_HOTKEY, "nonce-b")
 
-    async def test_same_nonce_different_hotkeys_both_succeed(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_same_nonce_different_hotkeys_both_succeed(self, cache: InMemoryCache) -> None:
         tracker = NonceTracker(cache)
         from tests.conftest import BOB_HOTKEY
 
@@ -75,9 +71,7 @@ class TestNonceLength:
 
 
 class TestNonceConcurrency:
-    async def test_concurrent_replays_only_one_succeeds(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_concurrent_replays_only_one_succeeds(self, cache: InMemoryCache) -> None:
         """Race 50 coroutines presenting the same nonce; exactly one must win."""
         tracker = NonceTracker(cache)
 
@@ -93,9 +87,7 @@ class TestNonceConcurrency:
 
 
 class TestNonceKeyFormat:
-    async def test_key_format_matches_reference_implementation(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_key_format_matches_reference_implementation(self, cache: InMemoryCache) -> None:
         """The canonical Redis key pattern is ``nonce:{hotkey}:{nonce}``."""
         tracker = NonceTracker(cache)
         await tracker.register(ALICE_HOTKEY, "probe")
@@ -109,11 +101,35 @@ class TestNonceConstructorValidation:
         [
             ({"max_nonce_length": 0}, ValueError),
             ({"ttl_seconds": 0}, ValueError),
+            # Negative or zero explicit skew is a misconfiguration.
+            ({"ttl_seconds": 60, "skew_seconds": 0}, ValueError),
+            ({"ttl_seconds": 60, "skew_seconds": -5}, ValueError),
+            # TTL < skew opens a replay window; constructor must refuse.
+            ({"ttl_seconds": 30, "skew_seconds": 60}, ValueError),
         ],
-        ids=["non-positive-max-length", "non-positive-ttl"],
+        ids=[
+            "non-positive-max-length",
+            "non-positive-ttl",
+            "zero-skew",
+            "negative-skew",
+            "ttl-below-skew",
+        ],
     )
     def test_rejects_invalid_constructor_args(
         self, cache: InMemoryCache, kwargs: dict, error_type: type
     ) -> None:
         with pytest.raises(error_type):
             NonceTracker(cache, **kwargs)
+
+    def test_ttl_equal_to_skew_is_accepted(self, cache: InMemoryCache) -> None:
+        # Equal TTL = skew is the tightest safe configuration.
+        NonceTracker(cache, ttl_seconds=60, skew_seconds=60)
+
+    def test_short_ttl_without_explicit_skew_warns(
+        self, cache: InMemoryCache, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="bittensor_auth.nonce"):
+            NonceTracker(cache, ttl_seconds=10)
+        assert any("ttl_seconds" in rec.message for rec in caplog.records)

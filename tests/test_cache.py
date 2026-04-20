@@ -88,9 +88,7 @@ class TestSetIfNotExists:
         assert await cache.set_if_not_exists("k", "second", ttl=60) is True
         assert await cache.get("k") == "second"
 
-    async def test_concurrent_callers_see_exactly_one_winner(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_concurrent_callers_see_exactly_one_winner(self, cache: InMemoryCache) -> None:
         """Replay protection depends on this primitive being atomic."""
         results = await asyncio.gather(
             *(cache.set_if_not_exists("k", str(i), ttl=60) for i in range(50))
@@ -189,3 +187,36 @@ class TestExpire:
 
     async def test_returns_false_for_missing_key(self, cache: InMemoryCache) -> None:
         assert await cache.expire("nope", 60) is False
+
+
+class TestSmembersAndDelete:
+    async def test_returns_snapshot_and_clears_set(self, cache: InMemoryCache) -> None:
+        await cache.sadd("s", "a", "b", "c")
+        snapshot = await cache.smembers_and_delete("s")
+        assert snapshot == {"a", "b", "c"}
+        assert await cache.smembers("s") == set()
+
+    async def test_missing_set_returns_empty(self, cache: InMemoryCache) -> None:
+        assert await cache.smembers_and_delete("nope") == set()
+
+    async def test_snapshot_isolated_from_later_adds(self, cache: InMemoryCache) -> None:
+        """The returned snapshot must not reflect concurrent additions."""
+        await cache.sadd("s", "a", "b")
+        snapshot = await cache.smembers_and_delete("s")
+        # New SADD against the same key creates a fresh set; snapshot must
+        # NOT mutate to reflect the new members.
+        await cache.sadd("s", "c")
+        assert snapshot == {"a", "b"}
+        assert await cache.smembers("s") == {"c"}
+
+    async def test_concurrent_calls_only_one_sees_members(self, cache: InMemoryCache) -> None:
+        """Under concurrency, exactly one caller receives the members."""
+        await cache.sadd("s", "a", "b", "c")
+
+        async def drain() -> set[str]:
+            return await cache.smembers_and_delete("s")
+
+        results = await asyncio.gather(*(drain() for _ in range(10)))
+        non_empty = [r for r in results if r]
+        assert len(non_empty) == 1
+        assert non_empty[0] == {"a", "b", "c"}

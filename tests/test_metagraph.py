@@ -247,3 +247,86 @@ class TestLifecycle:
             assert observed_threads[0].startswith("metagraph-sync")
         finally:
             await cache.stop()
+
+
+class TestStaleness:
+    def test_last_synced_at_none_before_sync(self) -> None:
+        stf, mgf = make_metagraph_factories()
+        cache = MetagraphCache(make_config(), subtensor_factory=stf, metagraph_factory=mgf)
+        assert cache.last_synced_at is None
+        assert cache.seconds_since_last_sync() is None
+
+    def test_last_synced_at_set_after_sync(self) -> None:
+        import time
+
+        snap = FakeMetagraph(["5HK1"], [True], [100.0])
+        stf, mgf = make_metagraph_factories(snapshots=[snap])
+        cache = MetagraphCache(make_config(), subtensor_factory=stf, metagraph_factory=mgf)
+        before = time.time()
+        cache.sync_now()
+        after = time.time()
+        assert cache.last_synced_at is not None
+        assert before <= cache.last_synced_at <= after
+        assert cache.seconds_since_last_sync() is not None
+        assert 0 <= cache.seconds_since_last_sync() <= (after - before + 0.1)
+
+    def test_stale_snapshot_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import time as time_mod
+
+        snap = FakeMetagraph(["5HK1"], [True], [100.0])
+        stf, mgf = make_metagraph_factories(snapshots=[snap])
+        cfg = make_config(metagraph_max_age_seconds=30)
+        cache = MetagraphCache(cfg, subtensor_factory=stf, metagraph_factory=mgf)
+        cache.sync_now()
+        # Sanity: fresh snapshot allows registration lookup
+        assert cache.is_hotkey_registered("5HK1") is True
+        # Fast-forward the clock past the staleness window
+        synced_at = cache.last_synced_at
+        assert synced_at is not None
+        monkeypatch.setattr(time_mod, "time", lambda: synced_at + 31)
+        assert cache.is_hotkey_registered("5HK1") is False
+        assert cache.has_validator_permit("5HK1") is False
+        assert cache.get_stake_weight("5HK1") is None
+
+    def test_staleness_check_disabled_with_zero(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import time as time_mod
+
+        snap = FakeMetagraph(["5HK1"], [True], [100.0])
+        stf, mgf = make_metagraph_factories(snapshots=[snap])
+        cfg = make_config(metagraph_max_age_seconds=0)
+        cache = MetagraphCache(cfg, subtensor_factory=stf, metagraph_factory=mgf)
+        cache.sync_now()
+        synced_at = cache.last_synced_at
+        assert synced_at is not None
+        monkeypatch.setattr(time_mod, "time", lambda: synced_at + 100000)
+        # With staleness disabled, the snapshot keeps serving indefinitely.
+        assert cache.is_hotkey_registered("5HK1") is True
+
+
+class TestHotkeyIndex:
+    def test_lookup_o1_via_cached_index(self) -> None:
+        """Ensure the cached index returns registration consistently."""
+        hotkeys = [f"5HK{i}" for i in range(200)]
+        permits = [False] * 200
+        stake = [0.0] * 200
+        snap = FakeMetagraph(hotkeys, permits, stake)
+        stf, mgf = make_metagraph_factories(snapshots=[snap])
+        cache = MetagraphCache(make_config(), subtensor_factory=stf, metagraph_factory=mgf)
+        cache.sync_now()
+        # Check first, middle, last
+        assert cache.is_hotkey_registered("5HK0") is True
+        assert cache.is_hotkey_registered("5HK100") is True
+        assert cache.is_hotkey_registered("5HK199") is True
+        assert cache.is_hotkey_registered("5HKnope") is False
+
+    def test_index_swapped_on_resync(self) -> None:
+        """A hotkey dropped from the metagraph must no longer appear."""
+        first = FakeMetagraph(["5HK1", "5HK2"], [False, False], [0.0, 0.0])
+        second = FakeMetagraph(["5HK2"], [False], [0.0])
+        stf, mgf = make_metagraph_factories(snapshots=[first, second])
+        cache = MetagraphCache(make_config(), subtensor_factory=stf, metagraph_factory=mgf)
+        cache.sync_now()
+        assert cache.is_hotkey_registered("5HK1") is True
+        cache.sync_now()
+        assert cache.is_hotkey_registered("5HK1") is False
+        assert cache.is_hotkey_registered("5HK2") is True

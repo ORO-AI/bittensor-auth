@@ -61,12 +61,16 @@ def _require_bearer_token(authorization: str | None) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header",
         )
-    if not authorization.startswith("Bearer "):
+    # Case-insensitive scheme and whitespace-tolerant split, so minor
+    # client quirks ("bearer TOKEN", extra spaces) don't cause a
+    # confusing 401.
+    parts = authorization.strip().split(None, 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Authorization header format",
         )
-    return authorization[len("Bearer ") :]
+    return parts[1].strip()
 
 
 def build_auth_router(
