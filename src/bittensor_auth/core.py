@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 
 from .errors import AuthenticationError, AuthErrorCode
 
