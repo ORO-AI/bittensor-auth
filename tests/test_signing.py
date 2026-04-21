@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 
 from bittensor_auth import (
     AuthenticationError,

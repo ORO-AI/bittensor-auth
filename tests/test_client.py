@@ -12,7 +12,7 @@ from typing import Any
 
 import httpx
 import pytest
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 
 from bittensor_auth.client import (
     AsyncSigningTransport,

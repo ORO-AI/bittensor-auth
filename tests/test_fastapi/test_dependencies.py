@@ -14,7 +14,7 @@ import time
 import uuid
 
 import pytest
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 from fastapi.testclient import TestClient
 
 from bittensor_auth import (

@@ -7,7 +7,7 @@ with real SR25519 signatures. No Redis, no Bittensor node required.
 
 from __future__ import annotations
 
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
