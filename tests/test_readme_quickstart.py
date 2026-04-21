@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 from fastapi.testclient import TestClient
 
 import bittensor_auth as bittensor_auth_pkg

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bittensor import Keypair
+from bittensor_wallet import Keypair
 from fastapi import Depends, FastAPI
 
 from bittensor_auth import (
