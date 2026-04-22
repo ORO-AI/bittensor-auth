@@ -4,6 +4,18 @@ All notable changes to `bittensor-auth` are documented here. The format follows 
 
 ## [Unreleased]
 
+### Added
+
+- `CacheBackend.sadd_with_ttl(key, ttl, *values)` — atomically add set members and (re)set TTL, closing a window where a mid-call crash could leave a set without expiry (unbounded Redis growth).
+- `SessionStore` now stamps a per-hotkey `session_revoked_after` epoch on every `revoke_all_sessions` call, and `get_session` rejects any session whose `created_at` predates the stamp. Closes the bulk-revocation race where a token's `sadd` could slip past the index sweep.
+- `BittensorAuthConfig.collapse_auth_error_codes` — opt-in; when `True`, all 401 responses return a single opaque `UNAUTHORIZED` code instead of distinct codes like `INVALID_SIGNATURE` / `NONCE_REUSED` / `TIMESTAMP_SKEW`, closing a mild enumeration side channel. Server logs retain the specific code.
+- `AuthErrorCode.NONCE_INVALID_CHARS` — `NonceTracker.register` now rejects nonces containing `:` (the cache key delimiter) so pathological values can't alias different `(hotkey, nonce)` pairs to the same Redis key.
+
+### Changed
+
+- `bittensor-wallet` dependency now pinned `>=2.1.0,<3.0.0` so a breaking 3.x release cannot silently alter signature verification semantics.
+- `SessionStore.create_session` uses the new `sadd_with_ttl` under the hood.
+
 ## [0.1.0] — 2026-04-20
 
 Initial public release.

@@ -69,9 +69,14 @@ class NonceTracker:
         return f"{NonceTracker._KEY_PREFIX}:{hotkey}:{nonce}"
 
     async def register(self, hotkey: str, nonce: str) -> None:
-        """Record a ``(hotkey, nonce)`` pair. Raises on replay or oversized nonce."""
+        """Record a ``(hotkey, nonce)`` pair. Raises on replay or invalid nonce."""
         if len(nonce) > self._max_nonce_length:
             raise AuthenticationError(AuthErrorCode.NONCE_TOO_LONG)
+        # ``:`` is the delimiter in the composite cache key. Allowing it
+        # in a nonce lets pathological values alias different
+        # ``(hotkey, nonce)`` pairs to the same Redis key.
+        if ":" in nonce:
+            raise AuthenticationError(AuthErrorCode.NONCE_INVALID_CHARS)
 
         is_new = await self._cache.set_if_not_exists(
             self._key(hotkey, nonce), "1", self._ttl_seconds
