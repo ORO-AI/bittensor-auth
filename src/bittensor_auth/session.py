@@ -133,12 +133,11 @@ class SessionStore:
             )
             return None
 
-        # Revocation barrier: a session created before the most recent
-        # ``revoke_all_sessions`` call is invalid even if it survived the
-        # index sweep (e.g. token written to Redis after SMEMBERS read
-        # but before operator expected revocation to have taken effect).
+        # Revocation barrier: reject sessions created at or before the
+        # most recent ``revoke_all_sessions``. Comparison is inclusive
+        # because both stamps are whole-second ``int(time.time())``.
         revoked_after = await self._get_revoked_after(session.hotkey)
-        if revoked_after is not None and session.created_at < revoked_after:
+        if revoked_after is not None and session.created_at <= revoked_after:
             return None
         return session
 

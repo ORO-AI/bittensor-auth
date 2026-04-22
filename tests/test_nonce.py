@@ -113,8 +113,12 @@ class TestNonceConstructorValidation:
             # Negative or zero explicit skew is a misconfiguration.
             ({"ttl_seconds": 60, "skew_seconds": 0}, ValueError),
             ({"ttl_seconds": 60, "skew_seconds": -5}, ValueError),
-            # TTL < skew opens a replay window; constructor must refuse.
+            # TTL must be at least 2 * skew because skew is two-sided;
+            # a strictly smaller TTL opens a replay window and the
+            # constructor must refuse.
             ({"ttl_seconds": 30, "skew_seconds": 60}, ValueError),
+            ({"ttl_seconds": 60, "skew_seconds": 60}, ValueError),
+            ({"ttl_seconds": 119, "skew_seconds": 60}, ValueError),
         ],
         ids=[
             "non-positive-max-length",
@@ -122,6 +126,8 @@ class TestNonceConstructorValidation:
             "zero-skew",
             "negative-skew",
             "ttl-below-skew",
+            "ttl-equal-to-skew",
+            "ttl-below-twice-skew",
         ],
     )
     def test_rejects_invalid_constructor_args(
@@ -130,9 +136,12 @@ class TestNonceConstructorValidation:
         with pytest.raises(error_type):
             NonceTracker(cache, **kwargs)
 
-    def test_ttl_equal_to_skew_is_accepted(self, cache: InMemoryCache) -> None:
-        # Equal TTL = skew is the tightest safe configuration.
-        NonceTracker(cache, ttl_seconds=60, skew_seconds=60)
+    def test_ttl_exactly_twice_skew_is_accepted(self, cache: InMemoryCache) -> None:
+        """2 * skew is the tightest safe configuration: it covers the
+        entire two-sided timestamp window a future-dated signature can
+        still validate under after first registration.
+        """
+        NonceTracker(cache, ttl_seconds=120, skew_seconds=60)
 
     def test_short_ttl_without_explicit_skew_warns(
         self, cache: InMemoryCache, caplog: pytest.LogCaptureFixture
