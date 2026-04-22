@@ -121,8 +121,6 @@ Out of scope for the package's review (handled by the adopter):
 
 **v0.1.2 — security hardening**
 
-> `v0.1.1` was tagged before any of the hardening below landed and is considered skipped; pin `>=0.1.2` to get this pass.
-
 Replay / session model:
 
 - `NonceTracker` now enforces `ttl_seconds >= 2 × skew_seconds` (the full two-sided skew window). The previous `ttl ≥ skew` bound left a one-sided replay gap for future-dated signatures after the nonce evicted; the default `ttl_seconds` is now 120s to match the default 60s skew.
@@ -152,7 +150,5 @@ Operator ergonomics:
 Documentation:
 
 - This `SECURITY.md` now documents the request-body / cross-endpoint replay gap under *What the signature binds to* (the signature covers `(hotkey, timestamp, nonce)` only — opt-in request binding is on the 0.2.0 roadmap).
-
-**v0.1.1** — tagged at an earlier commit without any of the above hardening. Skip this version.
 
 **v0.1.0** — initial release.
