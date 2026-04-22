@@ -220,3 +220,26 @@ class TestSmembersAndDelete:
         non_empty = [r for r in results if r]
         assert len(non_empty) == 1
         assert non_empty[0] == {"a", "b", "c"}
+
+
+class TestSaddWithTtl:
+    async def test_adds_members_and_sets_ttl(self, cache: InMemoryCache) -> None:
+        added = await cache.sadd_with_ttl("s", 1, "a", "b")
+        assert added == 2
+        assert await cache.smembers("s") == {"a", "b"}
+        await asyncio.sleep(1.05)
+        # TTL applied → set gone.
+        assert await cache.smembers("s") == set()
+
+    async def test_refreshes_ttl_on_subsequent_calls(self, cache: InMemoryCache) -> None:
+        await cache.sadd_with_ttl("s", 1, "a")
+        await asyncio.sleep(0.6)
+        # Re-add extends TTL by another 1s.
+        await cache.sadd_with_ttl("s", 1, "b")
+        await asyncio.sleep(0.6)
+        # Without refresh, first TTL would have expired by now (0.6+0.6=1.2s).
+        assert await cache.smembers("s") == {"a", "b"}
+
+    async def test_no_values_is_noop(self, cache: InMemoryCache) -> None:
+        assert await cache.sadd_with_ttl("s", 60) == 0
+        assert await cache.smembers("s") == set()

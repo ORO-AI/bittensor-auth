@@ -68,6 +68,16 @@ class CacheBackend(ABC):
         lock-held for in-memory).
         """
 
+    @abstractmethod
+    async def sadd_with_ttl(self, key: str, ttl: int, *values: str) -> int:
+        """Atomically add ``values`` to ``key`` and set its TTL.
+
+        The set's expiry is (re)set to ``ttl`` seconds in one step so a
+        crash between the add and the expiry cannot leave the index
+        without a TTL (which would cause unbounded Redis memory growth
+        on high-churn hotkeys).
+        """
+
 
 class InMemoryCache(CacheBackend):
     """Process-local cache with monotonic-clock TTL expiry.
@@ -199,6 +209,17 @@ class InMemoryCache(CacheBackend):
             del self._sets[key]
             return snapshot
 
+    async def sadd_with_ttl(self, key: str, ttl: int, *values: str) -> int:
+        if not values:
+            return 0
+        async with self._lock:
+            existing = self._get_set_locked(key)
+            members: _StrSet = existing if existing is not None else set()
+            before = len(members)
+            members.update(values)
+            self._sets[key] = (members, time.monotonic() + ttl)
+            return len(members) - before
+
     async def clear(self) -> None:
         async with self._lock:
             self._store.clear()
@@ -287,6 +308,17 @@ class RedisCache(CacheBackend):
     async def smembers_and_delete(self, key: str) -> _StrSet:
         members = await self._client.eval(self._SMEMBERS_AND_DELETE_SCRIPT, 1, key)
         return set(members) if members else set()
+
+    async def sadd_with_ttl(self, key: str, ttl: int, *values: str) -> int:
+        if not values:
+            return 0
+        # MULTI/EXEC guarantees both commands apply atomically on the
+        # server; a mid-call crash can't leave the set without a TTL.
+        pipe = self._client.pipeline(transaction=True)
+        pipe.sadd(key, *values)
+        pipe.expire(key, ttl)
+        results = await pipe.execute()
+        return int(results[0])
 
     async def close(self) -> None:
         await self._client.aclose()

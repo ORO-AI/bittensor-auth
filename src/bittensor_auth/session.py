@@ -96,6 +96,10 @@ class SessionStore:
     def _index_key(hotkey: str) -> str:
         return f"sessions_by_hotkey:{hotkey}"
 
+    @staticmethod
+    def _revoked_after_key(hotkey: str) -> str:
+        return f"session_revoked_after:{hotkey}"
+
     async def create_session(self, hotkey: str, role: str) -> str:
         """Issue a session token and add it to the per-hotkey index."""
         token = generate_session_token()
@@ -103,9 +107,9 @@ class SessionStore:
         await self._cache.setex(
             self._session_key(token), self._session_ttl, json.dumps(asdict(data))
         )
-        index_key = self._index_key(hotkey)
-        await self._cache.sadd(index_key, token)
-        await self._cache.expire(index_key, self._session_ttl)
+        # SADD + EXPIRE in a single atomic step so a mid-call crash can't
+        # leave the index without a TTL.
+        await self._cache.sadd_with_ttl(self._index_key(hotkey), self._session_ttl, token)
         return token
 
     async def get_session(self, token: str) -> SessionData | None:
@@ -114,7 +118,7 @@ class SessionStore:
             return None
         try:
             parsed = json.loads(raw)
-            return SessionData(
+            session = SessionData(
                 hotkey=parsed["hotkey"],
                 role=parsed["role"],
                 created_at=parsed["created_at"],
@@ -127,6 +131,25 @@ class SessionStore:
                 "Session %s... has malformed data; treating as invalid",
                 token[:12],
             )
+            return None
+
+        # Revocation barrier: a session created before the most recent
+        # ``revoke_all_sessions`` call is invalid even if it survived the
+        # index sweep (e.g. token written to Redis after SMEMBERS read
+        # but before operator expected revocation to have taken effect).
+        revoked_after = await self._get_revoked_after(session.hotkey)
+        if revoked_after is not None and session.created_at < revoked_after:
+            return None
+        return session
+
+    async def _get_revoked_after(self, hotkey: str) -> int | None:
+        raw = await self._cache.get(self._revoked_after_key(hotkey))
+        if raw is None:
+            return None
+        try:
+            return int(raw)
+        except ValueError:
+            logger.warning("Malformed revoked_after stamp for %s...", hotkey[:12])
             return None
 
     async def delete_session(self, token: str) -> None:
@@ -148,13 +171,28 @@ class SessionStore:
     async def revoke_all_sessions(self, hotkey: str) -> int:
         """Invalidate all sessions for ``hotkey``. Returns the count revoked.
 
-        Uses the cache's atomic ``smembers_and_delete`` so the member
-        read and index deletion cannot interleave with a concurrent
-        ``create_session``. A token added AFTER ``smembers_and_delete``
-        returns will survive (it gets its own fresh index key) — for
-        ban-enforcement, pair this with a ban-aware dependency that
-        re-checks the ban table on each authenticated request.
+        Closes the bulk-revocation race in two layers:
+
+        1. A ``revoked_after`` epoch is stamped *before* the index sweep.
+           ``get_session`` rejects any session whose ``created_at``
+           predates this stamp, catching tokens that were written to
+           Redis concurrently with (or slipped through) the index sweep.
+        2. The cache's atomic ``smembers_and_delete`` reads and deletes
+           the index in one step, so tokens sadd-ed before the sweep
+           are caught and their session records are purged.
+
+        Tokens created *after* the stamp are legitimate new sessions
+        and survive — pair revocation with a ``ban_checker`` if you
+        need those to be rejected as well.
         """
+        # Stamp the barrier FIRST. ``created_at`` on every session is
+        # captured before the session key hits Redis, so anything that
+        # was "in flight" at the moment we called revoke has
+        # ``created_at <= revoked_after`` and will fail the check in
+        # ``get_session`` even if its index sadd races past the sweep.
+        stamp = int(time.time())
+        await self._cache.setex(self._revoked_after_key(hotkey), self._session_ttl, str(stamp))
+
         index_key = self._index_key(hotkey)
         tokens = await self._cache.smembers_and_delete(index_key)
         for token in tokens:

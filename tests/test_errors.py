@@ -22,6 +22,7 @@ def test_all_required_codes_present() -> None:
         "INVALID_SIGNATURE_FORMAT",
         "INVALID_SIGNATURE",
         "NONCE_TOO_LONG",
+        "NONCE_INVALID_CHARS",
         "NONCE_REUSED",
         "NOT_REGISTERED",
         "NOT_REGISTERED_AS_VALIDATOR",

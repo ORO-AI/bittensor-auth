@@ -46,3 +46,12 @@ class BittensorAuthConfig:
     # failures but still alarms if the chain endpoint is wholly down.
     # Set to 0 to disable the staleness check (not recommended in prod).
     metagraph_max_age_seconds: int = 1200
+    # If True, all 401 authentication failures return a single opaque
+    # ``UNAUTHORIZED`` code to clients instead of distinct codes like
+    # ``INVALID_SIGNATURE`` / ``NONCE_REUSED`` / ``TIMESTAMP_SKEW``.
+    # Collapses a low-severity enumeration side channel at the cost of
+    # slightly less helpful client-facing errors. Server logs retain
+    # the specific error code either way. Disabled by default to keep
+    # existing behavior; enable for deployments that surface these
+    # errors directly to untrusted clients.
+    collapse_auth_error_codes: bool = False

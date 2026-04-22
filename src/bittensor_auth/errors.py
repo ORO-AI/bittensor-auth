@@ -14,6 +14,7 @@ class AuthErrorCode(Enum):
     INVALID_SIGNATURE_FORMAT = ("INVALID_SIGNATURE_FORMAT", "Invalid signature format")
     INVALID_SIGNATURE = ("INVALID_SIGNATURE", "Invalid signature")
     NONCE_TOO_LONG = ("NONCE_TOO_LONG", "Nonce exceeds maximum allowed length")
+    NONCE_INVALID_CHARS = ("NONCE_INVALID_CHARS", "Nonce contains invalid characters")
     NONCE_REUSED = ("NONCE_REUSED", "Nonce has already been used")
     NOT_REGISTERED = ("NOT_REGISTERED", "Hotkey not registered on subnet")
     NOT_REGISTERED_AS_VALIDATOR = (

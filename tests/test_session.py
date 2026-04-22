@@ -217,3 +217,42 @@ class TestRevokeAllSessions:
 
         assert revoked == 1
         assert await store.get_session(keep) is None
+
+    async def test_revoked_after_barrier_rejects_orphan_sessions(
+        self, cache: InMemoryCache
+    ) -> None:
+        """Simulate the race: a session record slips through the index
+        sweep. The ``revoked_after`` barrier in ``get_session`` must
+        still reject it because the session was created before revoke.
+        """
+        store = SessionStore(cache)
+        token = await store.create_session(ALICE_HOTKEY, "user")
+        # Simulate the race by clearing the index (as if SMEMBERS read
+        # happened before this token's sadd, then sadd ran after the
+        # index was deleted — token survives in session:<key> but
+        # revoke wouldn't see it via the index). We simulate by
+        # removing the token from the index manually.
+        await cache.delete(SessionStore._index_key(ALICE_HOTKEY))
+
+        # Token is still fetchable because its session key is intact.
+        assert await store.get_session(token) is not None
+
+        # Now revoke. Zero tokens found via the index, but the
+        # barrier should reject the in-flight token.
+        await store.revoke_all_sessions(ALICE_HOTKEY)
+        assert await store.get_session(token) is None
+
+    async def test_revoked_after_does_not_affect_new_sessions(self, cache: InMemoryCache) -> None:
+        """Sessions created after revoke_all_sessions must remain valid."""
+        import asyncio
+
+        store = SessionStore(cache)
+        await store.create_session(ALICE_HOTKEY, "user")
+        await store.revoke_all_sessions(ALICE_HOTKEY)
+
+        # Small sleep so the post-revoke session's created_at is
+        # strictly greater than the revoked_after stamp (both are
+        # int seconds).
+        await asyncio.sleep(1.1)
+        fresh = await store.create_session(ALICE_HOTKEY, "user")
+        assert await store.get_session(fresh) is not None

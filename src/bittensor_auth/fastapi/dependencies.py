@@ -41,7 +41,12 @@ class AuthenticatedUser:
     role: str | None = None
 
 
-def _missing_headers_error(missing: list[str]) -> HTTPException:
+_OPAQUE_401 = {"code": "UNAUTHORIZED", "message": "Authentication required"}
+
+
+def _missing_headers_error(missing: list[str], collapse: bool) -> HTTPException:
+    if collapse:
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_OPAQUE_401)
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={
@@ -52,13 +57,22 @@ def _missing_headers_error(missing: list[str]) -> HTTPException:
 
 
 def _banned_error() -> HTTPException:
+    # BANNED is a 403 (authorization decision, not credential invalidity)
+    # so it is kept distinct regardless of collapse_auth_error_codes.
     return HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail={"code": "BANNED", "message": "Hotkey is banned"},
     )
 
 
-def _extract_bearer(request: Request) -> str:
+def _session_invalid_error(detail: str, collapse: bool) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=_OPAQUE_401 if collapse else detail,
+    )
+
+
+def _extract_bearer(request: Request, collapse: bool) -> str:
     """Parse ``Authorization: Bearer <token>`` tolerant of case and whitespace.
 
     Returns the stripped token. Raises 401 if the header is missing or
@@ -67,10 +81,7 @@ def _extract_bearer(request: Request) -> str:
     auth_header = request.headers.get("Authorization", "")
     parts = auth_header.strip().split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
-        )
+        raise _session_invalid_error("Missing or invalid Authorization header", collapse)
     return parts[1].strip()
 
 
@@ -119,7 +130,9 @@ class BittensorAuth:
             if not self._metagraph.is_hotkey_registered(user.hotkey):
                 raise AuthenticationError(AuthErrorCode.NOT_REGISTERED)
         except AuthenticationError as exc:
-            raise auth_error_to_http(exc) from exc
+            raise auth_error_to_http(
+                exc, collapse_codes=self._config.collapse_auth_error_codes
+            ) from exc
         await self._check_banned(user)
         return user
 
@@ -130,7 +143,9 @@ class BittensorAuth:
             if not self._metagraph.has_validator_permit(user.hotkey):
                 raise AuthenticationError(AuthErrorCode.NOT_REGISTERED_AS_VALIDATOR)
         except AuthenticationError as exc:
-            raise auth_error_to_http(exc) from exc
+            raise auth_error_to_http(
+                exc, collapse_codes=self._config.collapse_auth_error_codes
+            ) from exc
         await self._check_banned(user)
         return user
 
@@ -140,7 +155,7 @@ class BittensorAuth:
             raise RuntimeError(
                 "require_session needs a session_store. Pass session_store= to BittensorAuth()."
             )
-        token = _extract_bearer(request)
+        token = _extract_bearer(request, self._config.collapse_auth_error_codes)
         return await self._authenticate_session(token)
 
     async def require_auth(self, request: Request) -> AuthenticatedUser:
@@ -150,7 +165,7 @@ class BittensorAuth:
             # Authorization header present — must validate as a Bearer
             # token. A presented-but-invalid Bearer must NOT silently
             # fall through to signed-request auth.
-            token = _extract_bearer(request)
+            token = _extract_bearer(request, self._config.collapse_auth_error_codes)
             return await self._authenticate_session(token)
 
         # No Authorization header → fall back to per-request signing.
@@ -166,9 +181,8 @@ class BittensorAuth:
         assert self._session_store is not None  # gated by caller
         session = await self._session_store.get_session(token)
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired session",
+            raise _session_invalid_error(
+                "Invalid or expired session", self._config.collapse_auth_error_codes
             )
 
         role: str | None = session.role
@@ -192,9 +206,9 @@ class BittensorAuth:
         if self._config.recheck_ban_on_session and not self._metagraph.is_hotkey_registered(
             session.hotkey
         ):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Hotkey is no longer registered",
+            raise _session_invalid_error(
+                "Hotkey is no longer registered",
+                self._config.collapse_auth_error_codes,
             )
 
         user = AuthenticatedUser(
@@ -209,7 +223,7 @@ class BittensorAuth:
     async def _authenticate(self, request: Request) -> AuthenticatedUser:
         headers, missing = self._extract_headers(request)
         if missing:
-            raise _missing_headers_error(missing)
+            raise _missing_headers_error(missing, self._config.collapse_auth_error_codes)
 
         hotkey = headers[HEADER_HOTKEY]
         timestamp_str = headers[HEADER_TIMESTAMP]
@@ -234,7 +248,9 @@ class BittensorAuth:
 
             await self._nonce_tracker.register(hotkey, nonce)
         except AuthenticationError as exc:
-            raise auth_error_to_http(exc) from exc
+            raise auth_error_to_http(
+                exc, collapse_codes=self._config.collapse_auth_error_codes
+            ) from exc
 
         role = await self._resolve_role(hotkey)
         return AuthenticatedUser(hotkey=hotkey, timestamp=timestamp, nonce=nonce, role=role)

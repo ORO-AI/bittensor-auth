@@ -29,7 +29,9 @@ dependencies = [
     # Only Keypair is needed for SR25519 verification — bittensor-wallet
     # provides it without the full bittensor SDK's transitive FastAPI pin.
     # Consumers using MetagraphCache still need the full bittensor package.
-    "bittensor-wallet>=2.1.0",
+    # Upper bound pinned so a breaking 3.x release can't silently alter
+    # signature verification semantics for downstream consumers.
+    "bittensor-wallet>=2.1.0,<3.0.0",
 ]
 
 [project.optional-dependencies]

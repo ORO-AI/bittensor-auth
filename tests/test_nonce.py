@@ -60,6 +60,15 @@ class TestNonceLength:
         tracker = NonceTracker(cache, max_nonce_length=8)
         await tracker.register(ALICE_HOTKEY, "a" * 8)
 
+    async def test_nonce_with_colon_is_rejected(self, cache: InMemoryCache) -> None:
+        """Colons would alias cache keys across hotkey boundaries."""
+        tracker = NonceTracker(cache)
+
+        with pytest.raises(AuthenticationError) as exc_info:
+            await tracker.register(ALICE_HOTKEY, "bad:nonce")
+
+        assert exc_info.value.error is AuthErrorCode.NONCE_INVALID_CHARS
+
     async def test_oversized_nonce_does_not_hit_cache(self, cache: InMemoryCache) -> None:
         """Length check must short-circuit before any backend write."""
         tracker = NonceTracker(cache, max_nonce_length=8)
