@@ -11,10 +11,16 @@ All notable changes to `bittensor-auth` are documented here. The format follows 
 - `BittensorAuthConfig.collapse_auth_error_codes` — opt-in; when `True`, all 401 responses return a single opaque `UNAUTHORIZED` code instead of distinct codes like `INVALID_SIGNATURE` / `NONCE_REUSED` / `TIMESTAMP_SKEW`, closing a mild enumeration side channel. Server logs retain the specific code.
 - `AuthErrorCode.NONCE_INVALID_CHARS` — `NonceTracker.register` now rejects nonces containing `:` (the cache key delimiter) so pathological values can't alias different `(hotkey, nonce)` pairs to the same Redis key.
 
+### Fixed
+
+- **Signature replay window closed** — `NonceTracker` now enforces `ttl_seconds >= 2 * skew_seconds` at construction. The skew window is two-sided, so a signature dated `now + skew` stayed valid for another `skew` seconds after registration; a TTL of only `skew` (the previous default) evicted the nonce before the timestamp expired and allowed a one-time replay. `BittensorAuth` auto-wires the tracker with `ttl = 2 * config.timestamp_skew_seconds`.
+- **Same-second revocation race** — `SessionStore.get_session` compares `created_at <= revoked_after` (inclusive) instead of strict `<`. Both stamps are whole-second `int(time.time())`, so the prior strict comparison let any session created in the same wall-clock second as `revoke_all_sessions` slip the barrier.
+
 ### Changed
 
 - `bittensor-wallet` dependency now pinned `>=2.1.0,<3.0.0` so a breaking 3.x release cannot silently alter signature verification semantics.
 - `SessionStore.create_session` uses the new `sadd_with_ttl` under the hood.
+- `NonceTracker` default `ttl_seconds` raised from 60 to 120 so it covers the default 60s timestamp skew on both sides.
 
 ## [0.1.0] — 2026-04-20
 

@@ -2,9 +2,12 @@
 
 Rejects duplicate ``(hotkey, nonce)`` pairs within a TTL window using
 atomic ``set_if_not_exists`` on the cache backend. The TTL must be at
-least as long as the server's timestamp skew window, otherwise replay
-protection has a gap: a nonce entry can expire while a matching
-timestamp is still accepted.
+least **twice** the server's timestamp skew window: the skew is
+two-sided (``abs(now - timestamp) <= skew``), so a signature dated
+``now + skew`` remains within skew for another ``skew`` seconds after
+registration. A TTL of only ``skew`` leaves a ``skew``-wide replay
+window once the nonce evicts — ``NonceTracker.__init__`` enforces
+``ttl_seconds >= 2 * skew_seconds`` to close that gap.
 """
 
 from __future__ import annotations
@@ -23,10 +26,13 @@ logger = logging.getLogger(__name__)
 class NonceTracker:
     """Atomic nonce replay protection backed by a :class:`CacheBackend`.
 
-    Pass ``skew_seconds`` to enforce ``ttl_seconds >= skew_seconds`` at
-    construction. Without an explicit skew, a very short TTL logs a
-    warning since it almost certainly indicates a misconfigured replay
-    window.
+    Pass ``skew_seconds`` to enforce ``ttl_seconds >= 2 * skew_seconds``
+    at construction. The factor of two is required because timestamp
+    skew is two-sided: a signature dated ``now + skew`` stays valid for
+    another ``skew`` seconds after it first arrives, so a TTL of only
+    ``skew`` leaves a ``skew``-wide replay gap once the nonce evicts.
+    Without an explicit skew, a very short TTL logs a warning since it
+    almost certainly indicates a misconfigured replay window.
     """
 
     _KEY_PREFIX = "nonce"
@@ -36,7 +42,7 @@ class NonceTracker:
         cache: CacheBackend,
         *,
         max_nonce_length: int = 256,
-        ttl_seconds: int = 60,
+        ttl_seconds: int = 120,
         skew_seconds: int | None = None,
     ) -> None:
         if max_nonce_length <= 0:
@@ -46,17 +52,19 @@ class NonceTracker:
         if skew_seconds is not None:
             if skew_seconds <= 0:
                 raise ValueError("skew_seconds must be positive")
-            if ttl_seconds < skew_seconds:
+            if ttl_seconds < 2 * skew_seconds:
                 raise ValueError(
-                    f"ttl_seconds ({ttl_seconds}) must be >= skew_seconds "
-                    f"({skew_seconds}) — otherwise a replay window opens "
-                    "when nonces expire while matching timestamps are still "
-                    "accepted"
+                    f"ttl_seconds ({ttl_seconds}) must be >= 2 * skew_seconds "
+                    f"({2 * skew_seconds}) — the skew window is two-sided, "
+                    "so a future-dated signature remains in skew for another "
+                    "skew_seconds after the nonce is first seen. A tighter "
+                    "TTL leaves a replay gap when nonces evict while matching "
+                    "timestamps are still accepted."
                 )
-        elif ttl_seconds < 60:
+        elif ttl_seconds < 120:
             logger.warning(
                 "NonceTracker ttl_seconds=%d is short; replay protection is "
-                "only as strong as ttl_seconds >= timestamp skew window. "
+                "only as strong as ttl_seconds >= 2 * timestamp skew window. "
                 "Pass skew_seconds= to enforce this invariant at construction.",
                 ttl_seconds,
             )

@@ -105,13 +105,14 @@ class BittensorAuth:
         self._config = config
         self._cache = cache
         self._metagraph = metagraph
-        # Pass skew through so NonceTracker enforces ttl >= skew at
-        # construction. Without this, shrinking the nonce TTL below the
-        # skew window silently opens a replay gap.
+        # Nonce TTL must cover the full two-sided skew window: a
+        # signature dated ``now + skew`` is valid until ``now + 2*skew``,
+        # so the nonce has to outlive that. NonceTracker enforces
+        # ``ttl >= 2 * skew`` at construction.
         self._nonce_tracker = nonce_tracker or _NonceTracker(
             cache,
             max_nonce_length=config.max_nonce_length,
-            ttl_seconds=config.timestamp_skew_seconds,
+            ttl_seconds=2 * config.timestamp_skew_seconds,
             skew_seconds=config.timestamp_skew_seconds,
         )
         self._role_resolver = role_resolver

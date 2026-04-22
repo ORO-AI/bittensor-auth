@@ -250,9 +250,28 @@ class TestRevokeAllSessions:
         await store.create_session(ALICE_HOTKEY, "user")
         await store.revoke_all_sessions(ALICE_HOTKEY)
 
-        # Small sleep so the post-revoke session's created_at is
-        # strictly greater than the revoked_after stamp (both are
-        # int seconds).
+        # A strictly later-second session must survive. The comparison
+        # in get_session is inclusive (``<=``) to catch same-second
+        # creates, so we sleep past the revoke stamp to land in a
+        # later wall-clock second.
         await asyncio.sleep(1.1)
         fresh = await store.create_session(ALICE_HOTKEY, "user")
         assert await store.get_session(fresh) is not None
+
+    async def test_same_second_race_is_caught(self, cache: InMemoryCache) -> None:
+        """A session created in the same wall-clock second as the revoke
+        must be rejected. Regression for a prior off-by-one (``<`` vs
+        ``<=``) that let same-second sessions slip through the barrier.
+        """
+        store = SessionStore(cache)
+
+        # Mint the session and the revocation in the same call path —
+        # both stamps land in the same wall-clock second.
+        token = await store.create_session(ALICE_HOTKEY, "user")
+        await store.revoke_all_sessions(ALICE_HOTKEY)
+
+        # Simulate the race: clear the index so the sweep would have
+        # missed the token, leaving the barrier as the sole defense.
+        await cache.delete(SessionStore._index_key(ALICE_HOTKEY))
+
+        assert await store.get_session(token) is None
