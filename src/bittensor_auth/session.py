@@ -191,9 +191,7 @@ class SessionStore:
         # ``created_at <= revoked_after`` and will fail the check in
         # ``get_session`` even if its index sadd races past the sweep.
         stamp = int(time.time())
-        await self._cache.setex(
-            self._revoked_after_key(hotkey), self._session_ttl, str(stamp)
-        )
+        await self._cache.setex(self._revoked_after_key(hotkey), self._session_ttl, str(stamp))
 
         index_key = self._index_key(hotkey)
         tokens = await self._cache.smembers_and_delete(index_key)

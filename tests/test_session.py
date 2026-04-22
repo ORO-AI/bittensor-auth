@@ -242,9 +242,7 @@ class TestRevokeAllSessions:
         await store.revoke_all_sessions(ALICE_HOTKEY)
         assert await store.get_session(token) is None
 
-    async def test_revoked_after_does_not_affect_new_sessions(
-        self, cache: InMemoryCache
-    ) -> None:
+    async def test_revoked_after_does_not_affect_new_sessions(self, cache: InMemoryCache) -> None:
         """Sessions created after revoke_all_sessions must remain valid."""
         import asyncio
 

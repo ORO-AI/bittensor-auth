@@ -46,9 +46,7 @@ _OPAQUE_401 = {"code": "UNAUTHORIZED", "message": "Authentication required"}
 
 def _missing_headers_error(missing: list[str], collapse: bool) -> HTTPException:
     if collapse:
-        return HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail=_OPAQUE_401
-        )
+        return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_OPAQUE_401)
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={
@@ -83,9 +81,7 @@ def _extract_bearer(request: Request, collapse: bool) -> str:
     auth_header = request.headers.get("Authorization", "")
     parts = auth_header.strip().split(None, 1)
     if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise _session_invalid_error(
-            "Missing or invalid Authorization header", collapse
-        )
+        raise _session_invalid_error("Missing or invalid Authorization header", collapse)
     return parts[1].strip()
 
 
