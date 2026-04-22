@@ -36,6 +36,15 @@ class NonceTracker:
     """
 
     _KEY_PREFIX = "nonce"
+    # A signature's validity window is ``2 * skew`` wide (``abs()``-
+    # based timestamp check in ``signing.validate_timestamp``), so the
+    # nonce has to outlive that to block replay.
+    _TTL_SKEW_MULTIPLIER = 2
+
+    @classmethod
+    def min_ttl_for_skew(cls, skew_seconds: int) -> int:
+        """Smallest ``ttl_seconds`` that safely covers a two-sided skew window."""
+        return cls._TTL_SKEW_MULTIPLIER * skew_seconds
 
     def __init__(
         self,
@@ -52,21 +61,24 @@ class NonceTracker:
         if skew_seconds is not None:
             if skew_seconds <= 0:
                 raise ValueError("skew_seconds must be positive")
-            if ttl_seconds < 2 * skew_seconds:
+            min_ttl = self.min_ttl_for_skew(skew_seconds)
+            if ttl_seconds < min_ttl:
                 raise ValueError(
-                    f"ttl_seconds ({ttl_seconds}) must be >= 2 * skew_seconds "
-                    f"({2 * skew_seconds}) — the skew window is two-sided, "
-                    "so a future-dated signature remains in skew for another "
-                    "skew_seconds after the nonce is first seen. A tighter "
-                    "TTL leaves a replay gap when nonces evict while matching "
-                    "timestamps are still accepted."
+                    f"ttl_seconds ({ttl_seconds}) must be >= {min_ttl} "
+                    f"({self._TTL_SKEW_MULTIPLIER} * skew_seconds) — the "
+                    "skew window is two-sided, so a future-dated signature "
+                    "remains in skew for another skew_seconds after the "
+                    "nonce is first seen. A tighter TTL leaves a replay gap "
+                    "when nonces evict while matching timestamps are still "
+                    "accepted."
                 )
         elif ttl_seconds < 120:
             logger.warning(
                 "NonceTracker ttl_seconds=%d is short; replay protection is "
-                "only as strong as ttl_seconds >= 2 * timestamp skew window. "
+                "only as strong as ttl_seconds >= %d * timestamp skew window. "
                 "Pass skew_seconds= to enforce this invariant at construction.",
                 ttl_seconds,
+                self._TTL_SKEW_MULTIPLIER,
             )
         self._cache = cache
         self._max_nonce_length = max_nonce_length
