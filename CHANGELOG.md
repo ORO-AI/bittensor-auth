@@ -4,6 +4,8 @@ All notable changes to `bittensor-auth` are documented here. The format follows 
 
 ## [Unreleased]
 
+## [0.1.2] — 2026-04-22
+
 ### Added
 
 - `CacheBackend.sadd_with_ttl(key, ttl, *values)` — atomically add set members and (re)set TTL, closing a window where a mid-call crash could leave a set without expiry (unbounded Redis growth).

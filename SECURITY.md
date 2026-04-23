@@ -119,25 +119,36 @@ Out of scope for the package's review (handled by the adopter):
 
 ## Changelog
 
-**v0.1.1 — second hardening pass**
+**v0.1.2 — security hardening**
+
+Replay / session model:
 
 - `NonceTracker` now enforces `ttl_seconds >= 2 × skew_seconds` (the full two-sided skew window). The previous `ttl ≥ skew` bound left a one-sided replay gap for future-dated signatures after the nonce evicted; the default `ttl_seconds` is now 120s to match the default 60s skew.
 - `SessionStore.get_session` rejects sessions with `created_at <= revoked_after` (inclusive), closing a same-second race where a session created in the same wall-clock second as `revoke_all_sessions` could survive the barrier.
-- `CacheBackend.sadd_with_ttl` atomic primitive; `SessionStore.create_session` uses it so a crash between SADD and EXPIRE cannot leave the per-hotkey index without a TTL (previously a potential unbounded-memory path in Redis).
 - `SessionStore.revoke_all_sessions` stamps a per-hotkey `session_revoked_after` epoch before sweeping the index; `get_session` rejects any session whose `created_at` predates the stamp. Catches tokens that slip the SMEMBERS atomic step (e.g. sadd-ed concurrently with revocation).
 - `NonceTracker.register` rejects nonces containing `:` (the cache-key delimiter) so pathological values can't alias `(hotkey, nonce)` pairs to the same Redis key. New `AuthErrorCode.NONCE_INVALID_CHARS` (400).
-- `BittensorAuthConfig.collapse_auth_error_codes` (default `False`) — opt-in opaque `UNAUTHORIZED` on every 401 response, for deployments that want to close a mild error-code enumeration side channel.
-- This `SECURITY.md` now documents the request-body / cross-endpoint replay gap under *What the signature binds to* (the signature covers `(hotkey, timestamp, nonce)` only — opt-in request binding is on the 0.2.0 roadmap).
-
-**v0.1.x — initial hardening (pre-0.1.1)**
-
-- Pinned `bittensor-wallet` to `>=2.1.0,<3.0.0`. Note: `bittensor-wallet` is the only direct dependency; the full `bittensor` SDK is *not* a direct dependency and is pulled transitively only when adopters construct a `MetagraphCache`. Adopters using `MetagraphCache` should pin `bittensor` themselves to control `Keypair.verify` stability.
-- Added `recheck_registration_on_session` and `recheck_ban_on_session` config flags (default `True`): Bearer-token auth now re-resolves role and rechecks registration on every request.
-- Added `MetagraphCache.last_synced_at` and `seconds_since_last_sync()` for integrator monitoring; `metagraph_max_age_seconds` fails closed when snapshots age out.
-- Added `CacheBackend.smembers_and_delete` atomic primitive; `SessionStore.revoke_all_sessions` no longer has the classic SMEMBERS-then-DEL race.
 - `default_is_public_endpoint` uses an exact-match whitelist instead of `endswith("/health")` (which previously leaked on paths like `/admin/x/health`).
 - Bearer-token parsing is case-insensitive and whitespace-tolerant.
+
+Cache / atomicity:
+
+- `CacheBackend.sadd_with_ttl` atomic primitive; `SessionStore.create_session` uses it so a crash between SADD and EXPIRE cannot leave the per-hotkey index without a TTL (previously a potential unbounded-memory path in Redis).
+- Added `CacheBackend.smembers_and_delete` atomic primitive; `SessionStore.revoke_all_sessions` no longer has the classic SMEMBERS-then-DEL race.
 - `SessionStore.get_session` returns `None` on malformed JSON instead of raising.
+
+Metagraph / integrator:
+
+- Added `recheck_registration_on_session` and `recheck_ban_on_session` config flags (default `True`): Bearer-token auth now re-resolves role and rechecks registration on every request.
+- Added `MetagraphCache.last_synced_at` and `seconds_since_last_sync()` for integrator monitoring; `metagraph_max_age_seconds` fails closed when snapshots age out.
 - Hotkey-to-uid lookup is O(1) via a cached index swapped atomically with the metagraph snapshot.
+
+Operator ergonomics:
+
+- `BittensorAuthConfig.collapse_auth_error_codes` (default `False`) — opt-in opaque `UNAUTHORIZED` on every 401 response, for deployments that want to close a mild error-code enumeration side channel.
+- Pinned `bittensor-wallet` to `>=2.1.0,<3.0.0`. Note: `bittensor-wallet` is the only direct dependency; the full `bittensor` SDK is *not* a direct dependency and is pulled transitively only when adopters construct a `MetagraphCache`. Adopters using `MetagraphCache` should pin `bittensor` themselves to control `Keypair.verify` stability.
+
+Documentation:
+
+- This `SECURITY.md` now documents the request-body / cross-endpoint replay gap under *What the signature binds to* (the signature covers `(hotkey, timestamp, nonce)` only — opt-in request binding is on the 0.2.0 roadmap).
 
 **v0.1.0** — initial release.

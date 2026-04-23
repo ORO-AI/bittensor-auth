@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "bittensor-auth"
-version = "0.1.1"
+version = "0.1.2"
 description = "Production-ready Bittensor authentication for Python web frameworks. SR25519 signature verification, metagraph-based registration checks, nonce replay protection, and session management."
 readme = "README.md"
 license = "Apache-2.0"
