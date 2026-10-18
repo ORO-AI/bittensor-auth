@@ -256,9 +256,7 @@ class TestBanCheckerHook:
 class TestRequireSession:
     def test_valid_bearer_token_accepted(self, alice: Keypair) -> None:
         auth, store = make_auth_with_session(alice)
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(alice.ss58_address, "user")
-        )
+        token = asyncio.run(store.create_session(alice.ss58_address, "user"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
@@ -289,9 +287,7 @@ class TestRequireSession:
 class TestRequireAuth:
     def test_bearer_token_accepted(self, alice: Keypair) -> None:
         auth, store = make_auth_with_session(alice)
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(alice.ss58_address, "validator")
-        )
+        token = asyncio.run(store.create_session(alice.ss58_address, "validator"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/dual", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
@@ -358,9 +354,7 @@ class TestSessionRecheck:
         )
         # Create a session for bob manually (as if bob had been registered
         # at session-creation time and later deregistered).
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(bob.ss58_address, "miner")
-        )
+        token = asyncio.run(store.create_session(bob.ss58_address, "miner"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
@@ -381,9 +375,7 @@ class TestSessionRecheck:
             metagraph=metagraph,
             session_store=store,
         )
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(bob.ss58_address, "miner")
-        )
+        token = asyncio.run(store.create_session(bob.ss58_address, "miner"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
         # The session is honored since recheck is disabled — this is the
@@ -410,9 +402,7 @@ class TestSessionRecheck:
             role_resolver=resolver,
             session_store=store,
         )
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(alice.ss58_address, "miner")
-        )
+        token = asyncio.run(store.create_session(alice.ss58_address, "miner"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 200
@@ -424,18 +414,14 @@ class TestBearerTokenParsing:
 
     def test_lowercase_bearer_scheme_accepted(self, alice: Keypair) -> None:
         auth, store = make_auth_with_session(alice)
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(alice.ss58_address, "user")
-        )
+        token = asyncio.run(store.create_session(alice.ss58_address, "user"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"bearer {token}"})
         assert resp.status_code == 200
 
     def test_extra_spaces_accepted(self, alice: Keypair) -> None:
         auth, store = make_auth_with_session(alice)
-        token = asyncio.get_event_loop().run_until_complete(
-            store.create_session(alice.ss58_address, "user")
-        )
+        token = asyncio.run(store.create_session(alice.ss58_address, "user"))
         with TestClient(build_test_app(auth)) as client:
             resp = client.get("/session-only", headers={"Authorization": f"  Bearer   {token}  "})
         assert resp.status_code == 200
